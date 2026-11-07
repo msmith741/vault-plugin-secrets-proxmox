@@ -13,7 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Lock
 from urllib.parse import parse_qs, unquote, urlsplit
 
-ISSUER_AUTH = "PVEAPIToken=issuer@pve!bootstrap=ci-only-issuer-secret"
+ISSUER_AUTH = "PVEAPIToken=workload@pve!bootstrap=ci-only-issuer-secret"
 ROUTE = re.compile(r"^/api2/json/access/users/([^/]+)/token/([^/]+)$")
 TOKENS = {}
 COUNTS = {"created": 0, "deleted": 0, "rejected": 0}
