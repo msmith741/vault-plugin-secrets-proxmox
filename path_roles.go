@@ -9,6 +9,32 @@ import (
 	"github.com/hashicorp/vault/sdk/logical"
 )
 
+
+const (
+	defaultRoleTTL    = 30 * time.Minute
+	defaultRoleMaxTTL = time.Hour
+	minRoleTTL        = time.Minute
+	maxRoleTTL        = 24 * time.Hour
+)
+
+// validateRoleLifetime fails closed for legacy roles without explicit
+// lifetimes. Issuance must never generate non-expiring Proxmox tokens.
+func validateRoleLifetime(r *proxmoxRoleEntry) error {
+	if r == nil || r.User == "" || r.Realm == "" {
+		return fmt.Errorf("role requires a Proxmox user and realm")
+	}
+	if r.TTL < minRoleTTL {
+		return fmt.Errorf("role ttl must be at least %s", minRoleTTL)
+	}
+	if r.MaxTTL < r.TTL {
+		return fmt.Errorf("role max_ttl must be greater than or equal to ttl")
+	}
+	if r.MaxTTL > maxRoleTTL {
+		return fmt.Errorf("role max_ttl must not exceed %s", maxRoleTTL)
+	}
+	return nil
+}
+
 type proxmoxRoleEntry struct {
 	Name   string        `json:"name"`
 	User   string        `json:"user"`
@@ -54,11 +80,11 @@ func pathRole(b *proxmoxBackend) []*framework.Path {
 				},
 				"ttl": {
 					Type:        framework.TypeDurationSecond,
-					Description: "Default lease for generated credentials. If not set or set to 0, will use system default.",
+					Description: "Required finite lease lifetime; defaults to 30 minutes for new roles (minimum 1 minute).",
 				},
 				"max_ttl": {
 					Type:        framework.TypeDurationSecond,
-					Description: "Maximum time for role. If not set or set to 0, will use system default.",
+					Description: "Maximum allowed role lifetime; defaults to 1 hour for new roles (maximum 24 hours).",
 				},
 			},
 			Operations: map[logical.Operation]framework.OperationHandler{
@@ -160,6 +186,8 @@ func (b *proxmoxBackend) pathRolesWrite(ctx context.Context, req *logical.Reques
 	if roleEntry == nil {
 		roleEntry = &proxmoxRoleEntry{
 			Name: name.(string),
+			TTL: defaultRoleTTL,
+			MaxTTL: defaultRoleMaxTTL,
 		}
 	}
 
@@ -193,8 +221,8 @@ func (b *proxmoxBackend) pathRolesWrite(ctx context.Context, req *logical.Reques
 		roleEntry.MaxTTL = time.Duration(d.Get("max_ttl").(int)) * time.Second
 	}
 
-	if roleEntry.MaxTTL != 0 && roleEntry.TTL > roleEntry.MaxTTL {
-		return logical.ErrorResponse("ttl cannot be greater than max_ttl"), nil
+	if err := validateRoleLifetime(roleEntry); err != nil {
+		return logical.ErrorResponse(err.Error()), nil
 	}
 
 	if err := setRole(ctx, req.Storage, name.(string), roleEntry); err != nil {

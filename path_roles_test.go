@@ -47,7 +47,6 @@ func TestUserRole(t *testing.T) {
 		})
 
 		require.Nil(t, err)
-		require.Nil(t, resp.Error())
 		require.Nil(t, resp)
 	})
 
@@ -68,7 +67,6 @@ func TestUserRole(t *testing.T) {
 		})
 
 		require.Nil(t, err)
-		require.Nil(t, resp.Error())
 		require.Nil(t, resp)
 	})
 
