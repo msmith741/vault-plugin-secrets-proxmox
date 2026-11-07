@@ -29,6 +29,7 @@ func TestUserRole(t *testing.T) {
 					"realm":   testRealm,
 					"ttl":     testTTL,
 					"max_ttl": testMaxTTL,
+					"inherit_user_privileges": true,
 				})
 			require.NoError(t, err)
 		}
@@ -44,6 +45,7 @@ func TestUserRole(t *testing.T) {
 			"realm":   realm,
 			"ttl":     testTTL,
 			"max_ttl": testMaxTTL,
+					"inherit_user_privileges": true,
 		})
 
 		require.Nil(t, err)
