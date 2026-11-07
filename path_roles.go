@@ -9,7 +9,6 @@ import (
 	"github.com/hashicorp/vault/sdk/logical"
 )
 
-
 const (
 	defaultRoleTTL    = 30 * time.Minute
 	defaultRoleMaxTTL = time.Hour
@@ -185,8 +184,8 @@ func (b *proxmoxBackend) pathRolesWrite(ctx context.Context, req *logical.Reques
 
 	if roleEntry == nil {
 		roleEntry = &proxmoxRoleEntry{
-			Name: name.(string),
-			TTL: defaultRoleTTL,
+			Name:   name.(string),
+			TTL:    defaultRoleTTL,
 			MaxTTL: defaultRoleMaxTTL,
 		}
 	}
