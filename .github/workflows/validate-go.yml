@@ -32,4 +32,10 @@ jobs:
           cache: true
       - run: go test ./...
       - run: go vet ./...
-      - run: test -z "$(gofmt -l $(git ls-files '*.go'))"
+      - name: Check Go formatting
+        run: |
+          unformatted="$(gofmt -l $(git ls-files '*.go'))"
+          if [ -n "$unformatted" ]; then
+            printf 'Unformatted Go files:\n%s\n' "$unformatted"
+            exit 1
+          fi
