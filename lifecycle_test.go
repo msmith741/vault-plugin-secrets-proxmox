@@ -73,7 +73,7 @@ func TestNativeTokenExpirationAlwaysFinite(t *testing.T) {
 			t.Fatal(err)
 		}
 		deadline := time.Unix(expires, 0)
-		if deadline.Before(now.Add(ttl)) || deadline.After(now.Add(ttl + time.Second)) {
+		if deadline.Before(now.Add(ttl)) || deadline.After(now.Add(ttl+time.Second)) {
 			t.Fatalf("expiry %s outside expected range", deadline)
 		}
 	}
