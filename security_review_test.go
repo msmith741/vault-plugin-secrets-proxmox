@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
+	neturl "net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -190,7 +190,7 @@ func TestRootCAPEMAndURLValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, raw := range []string{"https://pve.example:8006/api2/json", "https://pve.example:8006/api2/json#frag"} {
-		u, err := url.Parse(raw)
+		u, err := neturl.Parse(raw)
 		if err != nil {
 			t.Fatal(err)
 		}
