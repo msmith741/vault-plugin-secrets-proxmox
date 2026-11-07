@@ -31,6 +31,12 @@ func validateRoleLifetime(r *proxmoxRoleEntry) error {
 	if r.MaxTTL > maxRoleTTL {
 		return fmt.Errorf("role max_ttl must not exceed %s", maxRoleTTL)
 	}
+	if r.User == "root" && r.Realm == "pam" {
+		return fmt.Errorf("refusing to issue full-privilege root@pam tokens")
+	}
+	if !r.InheritUserPrivileges {
+		return fmt.Errorf("inherit_user_privileges=true must be acknowledged; generated tokens currently use privsep=false")
+	}
 	return nil
 }
 
@@ -40,8 +46,7 @@ type proxmoxRoleEntry struct {
 	Realm  string        `json:"realm"`
 	TTL    time.Duration `json:"ttl"`
 	MaxTTL time.Duration `json:"max_ttl"`
-
-	//SeparatedPrivileges bool          `json:"separated_privileges"`
+	InheritUserPrivileges bool `json:"inherit_user_privileges"`
 }
 
 func (r *proxmoxRoleEntry) toResponseData() map[string]interface{} {
@@ -51,8 +56,7 @@ func (r *proxmoxRoleEntry) toResponseData() map[string]interface{} {
 		"realm":   r.Realm,
 		"ttl":     r.TTL.Seconds(),
 		"max_ttl": r.MaxTTL.Seconds(),
-
-		//"separated_privileges": r.SeparatedPrivileges,
+		"inherit_user_privileges": r.InheritUserPrivileges,
 	}
 	return respData
 }
@@ -85,6 +89,11 @@ func pathRole(b *proxmoxBackend) []*framework.Path {
 				"max_ttl": {
 					Type:        framework.TypeDurationSecond,
 					Description: "Maximum allowed role lifetime; defaults to 1 hour for new roles (maximum 24 hours).",
+				},
+				"inherit_user_privileges": {
+					Type:        framework.TypeBool,
+					Description: "Required acknowledgement that generated tokens inherit ALL permissions of the parent Proxmox user (privsep=false).",
+					Default:     false,
 				},
 			},
 			Operations: map[logical.Operation]framework.OperationHandler{
@@ -232,6 +241,9 @@ func (b *proxmoxBackend) pathRolesWrite(ctx context.Context, req *logical.Reques
 		roleEntry.MaxTTL = time.Duration(maxTTLRaw.(int)) * time.Second
 	}
 
+	if acknowledged, ok := d.GetOk("inherit_user_privileges"); ok {
+		roleEntry.InheritUserPrivileges = acknowledged.(bool)
+	}
 	if err := validateRoleLifetime(roleEntry); err != nil {
 		return logical.ErrorResponse(err.Error()), nil
 	}
