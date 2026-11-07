@@ -104,11 +104,17 @@ jobs:
           # Trust exactly the observed leaf, checking its hostname below.
           openssl s_client -connect 127.0.0.1:8006             -servername pve-test.local -showcerts </dev/null 2>/dev/null             | openssl x509 -out "$RUNNER_TEMP/pve-root-ca.pem"
           openssl x509 -in "$RUNNER_TEMP/pve-root-ca.pem"             -noout -subject -issuer -ext subjectAltName
-          echo '127.0.0.1 pve-test.local' | sudo tee -a /etc/hosts >/dev/null
+          cert_host="$(openssl x509 -in "$RUNNER_TEMP/pve-root-ca.pem" \
+            -noout -subject -nameopt RFC2253 \
+            | sed -nE 's/^subject=.*CN=([^,]+).*$/\1/p')"
+          test -n "$cert_host"
+          printf '%s' "$cert_host" >"$RUNNER_TEMP/pve-hostname"
+          echo "127.0.0.1 $cert_host" | sudo tee -a /etc/hosts >/dev/null
+          echo "NO_PROXY=127.0.0.1,localhost,$cert_host" >>"$GITHUB_ENV"
           status="$(curl -sSo /dev/null -w '%{http_code}' \
             --cacert "$RUNNER_TEMP/pve-root-ca.pem" \
-            --resolve pve-test.local:8006:127.0.0.1 \
-            https://pve-test.local:8006/api2/json/version)"
+            --resolve "$cert_host:8006:127.0.0.1" \
+            "https://$cert_host:8006/api2/json/version")"
           if [ "$status" != 200 ] && [ "$status" != 401 ]; then
             echo "::error::Proxmox HTTPS API preflight failed (HTTP $status)"
             exit 1
@@ -147,6 +153,7 @@ jobs:
             --plugin "$RUNNER_TEMP/plugins/vault-plugin-secrets-proxmox" \
             --ca "$RUNNER_TEMP/pve-root-ca.pem" \
             --credentials "$RUNNER_TEMP/pve-credentials.json" \
+            --url "https://$(cat "$RUNNER_TEMP/pve-hostname"):8006/api2/json" \
             --report "$GITHUB_STEP_SUMMARY"
 
       - name: Destroy temporary systems and credential files
