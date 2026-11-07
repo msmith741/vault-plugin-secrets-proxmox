@@ -6,7 +6,7 @@ import (
 	"github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/vault/api"
 	"github.com/hashicorp/vault/sdk/plugin"
-	proxmox "github.com/mollstam/vault-plugin-secrets-proxmox"
+	proxmox "github.com/msmith741/vault-plugin-secrets-proxmox"
 )
 
 func main() {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	pxapi "github.com/Telmate/proxmox-api-go/proxmox"
 	"github.com/google/uuid"
@@ -35,72 +36,59 @@ func (b *proxmoxBackend) proxmoxToken() *framework.Secret {
 			},
 		},
 		Revoke: b.tokenRevoke,
-		Renew:  b.tokenRenew,
 	}
 }
 
+// revocationIdentity prefers the user and realm captured when the token
+// was issued. This remains correct even if the Vault role is updated or
+// deleted after issuance. Older leases fall back to the original role lookup.
+func (b *proxmoxBackend) revocationIdentity(
+	ctx context.Context, storage logical.Storage, data map[string]interface{},
+) (string, string, string, error) {
+	id, ok := data["token_id"].(string)
+	if !ok || id == "" {
+		return "", "", "", fmt.Errorf("lease is missing token_id")
+	}
+	user, userOK := data["user"].(string)
+	realm, realmOK := data["realm"].(string)
+	if userOK || realmOK {
+		if user == "" || realm == "" {
+			return "", "", "", fmt.Errorf("lease has incomplete Proxmox identity")
+		}
+		return user, realm, id, nil
+	}
+	// Existing unexpired leases from the upstream plugin contain only
+	// the role name. They can still be revoked while that role exists.
+	roleName, ok := data["role"].(string)
+	if !ok || roleName == "" {
+		return "", "", "", fmt.Errorf("legacy lease is missing role")
+	}
+	role, err := b.getRole(ctx, storage, roleName)
+	if err != nil {
+		return "", "", "", err
+	}
+	if role == nil || role.User == "" || role.Realm == "" {
+		return "", "", "", fmt.Errorf("cannot revoke legacy token: role %q is missing", roleName)
+	}
+	return role.User, role.Realm, id, nil
+}
+
 func (b *proxmoxBackend) tokenRevoke(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
+	if req.Secret == nil {
+		return nil, fmt.Errorf("cannot revoke token: missing lease secret")
+	}
+	user, realm, tokenID, err := b.revocationIdentity(ctx, req.Storage, req.Secret.InternalData)
+	if err != nil {
+		return nil, err
+	}
 	client, err := b.getClient(ctx, req.Storage)
 	if err != nil {
 		return nil, fmt.Errorf("error getting client: %w", err)
 	}
-
-	tokenID := ""
-	tokenIDRaw, ok := req.Secret.InternalData["token_id"]
-	if ok {
-		tokenID, ok = tokenIDRaw.(string)
-		if !ok {
-			return nil, fmt.Errorf("invalid value for token in secret internal data")
-		}
+	if err := deleteToken(ctx, client, user, realm, tokenID); err != nil {
+		return nil, fmt.Errorf("error revoking Proxmox token: %w", err)
 	}
-
-	roleRaw, ok := req.Secret.InternalData["role"]
-	if !ok {
-		return nil, fmt.Errorf("secret is missing role internal data")
-	}
-
-	role := roleRaw.(string)
-	roleEntry, err := b.getRole(ctx, req.Storage, role)
-	if err != nil {
-		return nil, fmt.Errorf("error retrieving role: %w", err)
-	}
-	if roleEntry == nil {
-		return nil, errors.New("error retrieving role: role is nil")
-	}
-
-	if err := deleteToken(ctx, client, roleEntry.User, roleEntry.Realm, tokenID); err != nil {
-		return nil, fmt.Errorf("error revoking user token: %w", err)
-	}
-
 	return nil, nil
-}
-
-func (b *proxmoxBackend) tokenRenew(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	roleRaw, ok := req.Secret.InternalData["role"]
-	if !ok {
-		return nil, fmt.Errorf("secret is missing role internal data")
-	}
-
-	role := roleRaw.(string)
-	roleEntry, err := b.getRole(ctx, req.Storage, role)
-	if err != nil {
-		return nil, fmt.Errorf("error retrieving role: %w", err)
-	}
-	if roleEntry == nil {
-		return nil, errors.New("error retrieving role: role is nil")
-	}
-
-	resp := &logical.Response{Secret: req.Secret}
-
-	if roleEntry.TTL > 0 {
-		resp.Secret.TTL = roleEntry.TTL
-	}
-
-	if roleEntry.MaxTTL > 0 {
-		resp.Secret.MaxTTL = roleEntry.MaxTTL
-	}
-
-	return resp, nil
 }
 
 func createToken(ctx context.Context, c *proxmoxClient, user string, realm string, expire int64, privsep bool) (*proxmoxToken, error) {
@@ -116,32 +104,31 @@ func createToken(ctx context.Context, c *proxmoxClient, user string, realm strin
 	// Proxmox API wants token IDs to start with a latter (regexp (?^:[A-Za-z][A-Za-z0-9\.\-_]+)) so lets remap the entire thing
 	tokenId := strings.NewReplacer("0", "g", "1", "h", "2", "i", "3", "j", "4", "k", "5", "l", "6", "m", "7", "n", "8", "o", "9", "p").Replace(rawTokenId)
 
-	u, err := pxapi.NewConfigUserFromApi(pxapi.UserID{Name: user, Realm: realm}, c.Client)
-	if err != nil {
-		return nil, fmt.Errorf("error when setting up API user: %w", err)
+	if expire <= time.Now().Unix() {
+		return nil, errors.New("refusing to create a Proxmox token without a future native expiration")
 	}
-
-	secret, err := u.CreateApiToken(c.Client, pxapi.ApiToken{TokenId: tokenId, Comment: "Managed by Vault", Expire: expire, Privsep: privsep})
+	comment := "Managed by Vault"
+	expiration := uint(expire)
+	secret, err := c.New().ApiToken.Create(ctx, pxapi.UserID{Name: user, Realm: realm}, pxapi.ApiTokenConfig{
+		Name:                pxapi.ApiTokenName(tokenId),
+		Comment:             &comment,
+		Expiration:          &expiration,
+		PrivilegeSeparation: &privsep,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("error from API when creating token: %w", err)
 	}
 
 	return &proxmoxToken{
 		TokenID: tokenId,
-		Secret:  secret,
+		Secret:  secret.String(),
 	}, nil
 }
 
 func deleteToken(ctx context.Context, c *proxmoxClient, user string, realm string, tokenID string) error {
-	u, err := pxapi.NewConfigUserFromApi(pxapi.UserID{Name: user, Realm: realm}, c.Client)
-	if err != nil {
-		return err
-	}
-
-	err = u.DeleteApiToken(c.Client, pxapi.ApiToken{TokenId: tokenID})
-	if err != nil {
-		return err
-	}
-
-	return nil
+	_, err := c.New().ApiToken.Delete(ctx, pxapi.ApiTokenID{
+		User:      pxapi.UserID{Name: user, Realm: realm},
+		TokenName: pxapi.ApiTokenName(tokenID),
+	})
+	return err
 }

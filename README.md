@@ -61,3 +61,69 @@ vault lease revoke proxmox/creds/alice/<lease id>
 ## Contribute
 
 Pull requests welcome, and be nice.
+
+
+## Security and lease lifecycle (hardening branch)
+
+New roles default to a **30-minute TTL** and a **1-hour maximum TTL**.
+A role must have a finite TTL of at least one minute, and its maximum
+must not exceed 24 hours. Existing legacy roles with TTL 0 are rejected
+during issuance until updated. Token creation cannot fall back to
+Proxmox's never-expiring `expire=0` behavior.
+
+Issued tokens are **non-renewable**. Vault lease renewal is intentionally
+unsupported because the upstream implementation did not extend the
+independent Proxmox expiration. The native expiration is rounded up to
+the next second so it cannot precede the Vault lease deadline.
+
+The lease records the immutable issuing Proxmox user and realm. New
+leases can be revoked even after their Vault role changes or is deleted.
+For legacy leases, revocation still consults the original role and thus
+requires it to exist; revoke outstanding legacy leases before changing
+or deleting such roles.
+
+### Separate image and VM identities
+
+Use two instances of the secrets engine, each with a separate issuer
+credential, if the issuer API scopes must be isolated. Within each mount,
+define a role with a dedicated **least-privileged Proxmox user**:
+
+```sh
+vault write proxmox-images/role/image-builder user=tofu-images realm=pve ttl=30m max_ttl=1h
+vault write proxmox-vms/role/vm-deployer user=tofu-vm realm=pve ttl=30m max_ttl=1h
+```
+
+Each generated token currently uses `privsep=false` and inherits its
+parent user's permissions. Do **not** assign broad privileges (including
+privileges that allow the short-lived token to mint replacements) to
+those users. Prove issuer capabilities, token self-mint behavior and
+revocation on disposable Proxmox accounts before enabling production.
+
+### Not yet production certified
+
+This first PR does not upgrade the 2023 dependencies, prove live PVE
+compatibility, implement per-token privilege separation, or change the
+issuer model. CI is an initial gate. Review, update and retest dependencies
+and prove token expiry and revocation against a disposable Proxmox
+identity before installing the plugin on `vault01`.
+
+## Dependency modernization
+
+The fork now targets Go 1.27.3 for CI and release builds, Vault SDK
+v0.26.0, Vault API v1.23.0, and the Proxmox API client pinned to
+`06d3c5a3ac83` (October 31, 2026). The Go module path was changed
+to this fork's canonical import path.
+
+The Proxmox API client now uses the typed `Client.New().ApiToken`
+interface for creating and deleting tokens. This is a source/API
+migration; a successful compile is not a substitute for a controlled
+live issuer-permission test on a disposable Proxmox identity.
+
+To validate locally:
+
+```sh
+go mod verify
+go test ./...
+go vet ./...
+go build ./cmd/vault-plugin-secrets-proxmox
+```

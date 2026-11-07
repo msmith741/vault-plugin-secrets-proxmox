@@ -2,7 +2,6 @@ package proxmox
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -21,39 +20,53 @@ func pathCredentials(b *proxmoxBackend) *framework.Path {
 			},
 		},
 		Callbacks: map[logical.Operation]framework.OperationFunc{
-			logical.ReadOperation:   b.pathCredentialsRead,
-			logical.UpdateOperation: b.pathCredentialsRead,
+			logical.ReadOperation: b.pathCredentialsRead,
 		},
 		HelpSynopsis:    pathCredentialsHelpSyn,
 		HelpDescription: pathCredentialsHelpDesc,
 	}
 }
 
+// Proxmox stores expiration as a Unix timestamp with one-second
+// resolution. Round upward so the native expiration never precedes
+// Vault's finite lease lifetime.
+func nativeTokenExpiration(now time.Time, ttl time.Duration) (int64, error) {
+	if ttl < minRoleTTL || ttl > maxRoleTTL {
+		return 0, fmt.Errorf("refusing to create a token with invalid ttl %s", ttl)
+	}
+	deadline := now.Add(ttl)
+	if deadline.Nanosecond() != 0 {
+		deadline = deadline.Truncate(time.Second).Add(time.Second)
+	}
+	if deadline.Unix() <= now.Unix() {
+		return 0, fmt.Errorf("token expiration must be in the future")
+	}
+	return deadline.Unix(), nil
+}
+
 func (b *proxmoxBackend) createToken(ctx context.Context, s logical.Storage, role *proxmoxRoleEntry) (*proxmoxToken, error) {
+	// Check all limits before any Proxmox API request.
+	if err := validateRoleLifetime(role); err != nil {
+		return nil, err
+	}
+	expire, err := nativeTokenExpiration(time.Now(), role.TTL)
+	if err != nil {
+		return nil, err
+	}
 	client, err := b.getClient(ctx, s)
 	if err != nil {
 		return nil, err
 	}
 
-	var token *proxmoxToken
-
-	expire := int64(0)
-	if role.TTL > 0 {
-		expire = time.Now().Add(role.TTL).Unix()
-	}
-
-	// TODO: separated privileges always false for now, should support setting what privileges to use before exposing?
-	privsep := false
-
-	token, err = createToken(ctx, client, role.User, role.Realm, expire, privsep)
+	// Issued tokens inherit only the dedicated Proxmox user's permissions.
+	// Fine-grained per-token ACL assignment is not yet implemented.
+	token, err := createToken(ctx, client, role.User, role.Realm, expire, false)
 	if err != nil {
-		return nil, fmt.Errorf("error creating Proxmox API token for role '%v': %w", role.Name, err)
+		return nil, fmt.Errorf("error creating Proxmox API token for role %q: %w", role.Name, err)
 	}
-
 	if token == nil {
-		return nil, errors.New("error creating Proxmox API token")
+		return nil, fmt.Errorf("Proxmox API returned no token")
 	}
-
 	return token, nil
 }
 
@@ -62,7 +75,6 @@ func (b *proxmoxBackend) createUserCreds(ctx context.Context, req *logical.Reque
 	if err != nil {
 		return nil, err
 	}
-
 	tokenIDFull := fmt.Sprintf("%s@%s!%s", role.User, role.Realm, token.TokenID)
 
 	resp := b.Secret(proxmoxTokenType).Response(map[string]interface{}{
@@ -71,39 +83,30 @@ func (b *proxmoxBackend) createUserCreds(ctx context.Context, req *logical.Reque
 		"secret":        token.Secret,
 	}, map[string]interface{}{
 		"token_id": token.TokenID,
-		"role":     role.Name,
+		"role":     role.Name, // retained solely for old-lease compatibility
+		"user":     role.User, // immutable issuance identity for revocation
+		"realm":    role.Realm,
 	})
 
-	if role.TTL > 0 {
-		resp.Secret.TTL = role.TTL
-	}
-
-	if role.MaxTTL > 0 {
-		resp.Secret.MaxTTL = role.MaxTTL
-	}
-
+	resp.Secret.TTL = role.TTL
+	// Vault lease renewals are disabled: extending the lease would otherwise
+	// outlast the independently enforced Proxmox token expiration.
+	resp.Secret.MaxTTL = role.TTL
+	resp.Secret.Renewable = false
 	return resp, nil
 }
 
 func (b *proxmoxBackend) pathCredentialsRead(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	roleName := d.Get("name").(string)
-
-	roleEntry, err := b.getRole(ctx, req.Storage, roleName)
+	name := d.Get("name").(string)
+	role, err := b.getRole(ctx, req.Storage, name)
 	if err != nil {
 		return nil, fmt.Errorf("error retrieving role: %w", err)
 	}
-
-	if roleEntry == nil {
-		return nil, errors.New("error retrieving role: role is nil")
+	if role == nil {
+		return nil, fmt.Errorf("role %q does not exist", name)
 	}
-
-	return b.createUserCreds(ctx, req, roleEntry)
+	return b.createUserCreds(ctx, req, role)
 }
 
-const pathCredentialsHelpSyn = `
-Generate a Proxmox API token from a specific Vault role.
-`
-
-const pathCredentialsHelpDesc = `
-This path generates a Proxmox API token based on a particular role.
-`
+const pathCredentialsHelpSyn = "Generate a finite-lived Proxmox API token from a role."
+const pathCredentialsHelpDesc = "Each read creates a new non-renewable, natively expiring Proxmox API token."
