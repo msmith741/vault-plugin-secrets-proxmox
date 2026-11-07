@@ -3,8 +3,8 @@ package proxmox
 import (
 	"crypto/tls"
 	"crypto/x509"
-	"fmt"
 	"errors"
+	"fmt"
 
 	pxapi "github.com/Telmate/proxmox-api-go/proxmox"
 )
