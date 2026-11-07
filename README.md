@@ -3,7 +3,7 @@
 A community **HashiCorp Vault external secrets-engine plugin** that creates temporary **Proxmox Virtual Environment API tokens**. Vault issues a lease for each generated credential and calls Proxmox to delete the token when that lease is revoked or expires.
 
 > [!WARNING]
-> **Pre-production software.** Automated tests and mock Proxmox API tests are available, but successful integration with every Vault and Proxmox version, issuer privilege delegation, and protection against generated tokens creating replacement tokens have **not** been established. Complete the [security acceptance checklist](docs/security.md#pre-production-acceptance-checklist) before deploying with privileged or production infrastructure access.
+> **Pre-production software.** Unit tests and an ephemeral real-Vault/simulated-Proxmox integration test are available, but successful integration with every Vault and Proxmox version, issuer privilege delegation, and protection against generated tokens creating replacement tokens have **not** been established. Complete the [security acceptance checklist](docs/security.md#pre-production-acceptance-checklist) before deploying with privileged or production infrastructure access.
 
 ## Features and constraints
 
@@ -26,6 +26,7 @@ The `inherit_user_privileges=true` role setting is an **explicit acknowledgement
 | Document | Contents |
 |---|---|
 | **[Deployment guide](docs/deployment.md)** | Prerequisites; Proxmox identities; compilation; Vault server configuration; plugin registration; live mount/role configuration; credentials; verification |
+| **[Ephemeral integration tests](docs/testing.md)** | One-click GitHub Actions test with real disposable Vault and a local Proxmox HTTPS simulator; no persistent deployment required |
 | **[Configuration and API reference](docs/configuration.md)** | Every Vault API path, field, response, TTL rule, examples, and Vault ACL policy patterns |
 | **[Security and acceptance](docs/security.md)** | Permission model, threat analysis, release gates, token lifetime implications, safe authentication |
 | **[Operations](docs/operations.md)** | Health checks, issuance/revocation, issuer rotation, upgrades, rollback, HA, backup, alerting, troubleshooting |
@@ -86,7 +87,8 @@ Read [the deployment guide](docs/deployment.md) for the required infrastructure 
 ## Current release status
 
 - GitHub Actions verifies the module graph, unit tests, race detector, compilation, `go vet`, formatting, and release configuration.
-- The code has synthetic TLS Proxmox API and lease-callback tests.
+- GitHub Actions runs a real disposable Vault 1.21.4 plugin process against a loopback HTTPS Proxmox simulator. Registration, mounting, authorization, issuance, expiry metadata and lease revocation have passed.
+- [Run the ephemeral integration test](https://github.com/msmith741/vault-plugin-secrets-proxmox/actions/workflows/test-ephemeral-vault.yml) directly from GitHub; no real Vault or Proxmox credentials are required.
 - It has **not** been approved for unattended use with privileged Proxmox accounts; the permission-boundary acceptance tests remain outstanding.
 - Token renewal and per-token Proxmox ACL assignment are not implemented.
 - The plugin's Vault `role.max_ttl` field validates configuration; because leases are non-renewable, it does not enable renewals or extend `role.ttl`.
