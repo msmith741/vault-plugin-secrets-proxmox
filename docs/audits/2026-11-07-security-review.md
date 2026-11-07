@@ -40,6 +40,23 @@ The audit checked the issuer/role security boundary, Vault policy implications, 
 | Identity restriction, TLS hardening, error redaction and redirect behavior | New unit/regression cases | Changes must remain gated by CI and actual endpoint acceptance |
 | Public vulnerability database scan | `govulncheck` (pinned version) | Only known vulnerabilities, reachable-code heuristics; not a substitute for reviewing advisories and libraries |
 
+## Dependency audit finding and remediation
+
+The newly introduced `govulncheck` gate initially found **five reachable
+HTTP/2 vulnerabilities** in the transitive `golang.org/x/net v0.59.0`
+dependency (`GO-2026-6603`, `GO-2026-6610`, `GO-2026-6611`,
+`GO-2026-6612`, `GO-2026-6617`). Upstream fixes are available in
+`golang.org/x/net v0.60.0`. The repository was upgraded to that version,
+and its `go.sum` checksums were updated from published Go module sums.
+The follow-up pinned `govulncheck` scan **passed**.
+
+- [Go vulnerability report GO-2026-6603](https://pkg.go.dev/vuln/GO-2026-6603)
+- [GitHub-hosted Go vulnerability gate](../../.github/workflows/validate-go.yml)
+
+This is a snapshot of **known** vulnerabilities on the audit date, not a
+guarantee that new advisories will not appear. Keep scanning on every code
+change and ahead of each production binary release.
+
 ## Residual risks and explicit production gates
 
 | Severity | Finding / residual risk | Required release action |
