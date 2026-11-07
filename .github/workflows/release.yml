@@ -1,14 +1,50 @@
 name: release
+
 on:
   push:
     tags:
       - 'v*'
+
 permissions:
-  contents: write
+  contents: read
+
 jobs:
+  verify:
+    name: Validate tagged release candidate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27.3"
+          cache: true
+      - name: Require release commit to be reachable from main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main
+      - name: Verify dependencies and Go module graph
+        run: |
+          go mod verify
+          go mod tidy -diff
+      - name: Run tests and static analysis before publishing
+        run: |
+          go test -race ./...
+          go vet ./...
+      - name: Reject known reachable vulnerabilities
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
   goreleaser:
+    name: Publish verified release
+    needs: verify
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
