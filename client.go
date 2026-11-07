@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
+	neturl "net/url"
 
 	pxapi "github.com/Telmate/proxmox-api-go/proxmox"
 )
@@ -45,9 +45,9 @@ func newClientWithContext(ctx context.Context, config *proxmoxConfig) (*proxmoxC
 
 	// Never allow Proxmox redirects to forward issuer credentials to a
 	// different endpoint, even if a redirect targets a related hostname.
-	var proxy func(*http.Request) (*url.URL, error)
+	var proxy func(*http.Request) (*neturl.URL, error)
 	if config.ProxyServer != "" {
-		parsed, err := url.ParseRequestURI(config.ProxyServer)
+		parsed, err := neturl.ParseRequestURI(config.ProxyServer)
 		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
 			return nil, errors.New("invalid legacy Proxmox proxy URL")
 		}
