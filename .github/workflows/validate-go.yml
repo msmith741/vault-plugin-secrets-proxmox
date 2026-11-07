@@ -49,7 +49,7 @@ jobs:
           go-version: "1.27.3"
           cache: true
       - name: Lint real Proxmox workflow syntax
-        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 -color .github/workflows/test-real-proxmox.yml
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 -color .github/workflows/test-real-proxmox.yml .github/workflows/release.yml
       - name: Verify dependency checksums
         run: go mod verify
       - name: Verify module graph is tidy
