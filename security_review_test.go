@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	neturl "net/url"
@@ -111,16 +112,24 @@ func TestProxmoxTokenLifecycleAgainstMockTLSAPI(t *testing.T) {
 		defer mu.Unlock()
 		switch r.Method {
 		case http.MethodPost:
-			if err := r.ParseForm(); err != nil {
-				http.Error(w, "invalid form", http.StatusBadRequest)
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, "invalid form body", http.StatusBadRequest)
 				return
 			}
-			exp, err := strconv.ParseInt(r.FormValue("expire"), 10, 64)
+			params, err := neturl.ParseQuery(string(body))
+			if err != nil {
+				http.Error(w, "invalid form encoding", http.StatusBadRequest)
+				return
+			}
+			exp, err := strconv.ParseInt(params.Get("expire"), 10, 64)
 			if err != nil || exp <= time.Now().Unix() {
+				t.Logf("missing expiry, form params=%v; content-type=%q", params, r.Header.Get("Content-Type"))
 				http.Error(w, "native expiration missing", http.StatusBadRequest)
 				return
 			}
-			if r.FormValue("privsep") != "0" {
+			if params.Get("privsep") != "0" {
+				t.Logf("unexpected privilege mode: %q, form params=%v", params.Get("privsep"), params)
 				http.Error(w, "unexpected privilege mode", http.StatusBadRequest)
 				return
 			}
