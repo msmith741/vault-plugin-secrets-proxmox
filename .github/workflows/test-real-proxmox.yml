@@ -1,0 +1,157 @@
+name: Real Proxmox API integration (disposable container)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - "tests/e2e/real_proxmox_vault_e2e.py"
+      - ".github/workflows/test-real-proxmox.yml"
+  push:
+    branches: [main]
+    paths:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - "tests/e2e/real_proxmox_vault_e2e.py"
+      - ".github/workflows/test-real-proxmox.yml"
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  real-pve:
+    name: Vault + actual Proxmox VE auth API
+    # No self-hosted runners or shared credentials; no untrusted fork code.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      VAULT_ADDR: "http://127.0.0.1:8200"
+      VAULT_TOKEN: "ci-only-vault-dev-token"
+      VAULT_VERSION: "1.21.4"
+      # Third-party, test-only image with public credentials. Pin digest after validation.
+      PVE_IMAGE: "ghcr.io/client-api/proxmox-docker/pve-test:9.2.2"
+      NO_PROXY: "127.0.0.1,localhost,pve-test.local"
+      no_proxy: "127.0.0.1,localhost,pve-test.local"
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27.3"
+          cache: true
+
+      - name: Build external Vault plugin
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/plugins"
+          CGO_ENABLED=0 go build -trimpath \
+            -o "$RUNNER_TEMP/plugins/vault-plugin-secrets-proxmox" \
+            ./cmd/vault-plugin-secrets-proxmox
+          chmod 0755 "$RUNNER_TEMP/plugins/vault-plugin-secrets-proxmox"
+
+      - name: Install checksum-verified Vault CLI and server
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://releases.hashicorp.com/vault/${VAULT_VERSION}"
+          filename="vault_${VAULT_VERSION}_linux_amd64.zip"
+          curl --fail --silent --show-error --location \
+            -o "$RUNNER_TEMP/$filename" "$base/$filename"
+          curl --fail --silent --show-error --location \
+            -o "$RUNNER_TEMP/SHA256SUMS" "$base/vault_${VAULT_VERSION}_SHA256SUMS"
+          ( cd "$RUNNER_TEMP" && grep -F " $filename" SHA256SUMS | sha256sum --check - )
+          mkdir -p "$RUNNER_TEMP/vault-bin"
+          unzip -q "$RUNNER_TEMP/$filename" -d "$RUNNER_TEMP/vault-bin"
+          echo "$RUNNER_TEMP/vault-bin" >> "$GITHUB_PATH"
+
+      - name: Start disposable Proxmox VE container
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker pull "$PVE_IMAGE"
+          docker image inspect --format 'Reviewed digest candidate: {{index .RepoDigests 0}}' "$PVE_IMAGE"
+          docker run -d --rm \
+            --name pve-test --hostname pve-test --privileged \
+            --device /dev/fuse \
+            --tmpfs /tmp --tmpfs /run --tmpfs /run/lock \
+            --publish 127.0.0.1:8006:8006 \
+            --env PVE_HOSTNAME=pve-test \
+            --env PVE_FQDN=pve-test.local \
+            --env PVE_SEED_FIXTURE_VM=0 \
+            --env PVE_SEED_FIXTURE_CT=0 \
+            "$PVE_IMAGE" >/dev/null
+          for i in $(seq 1 60); do
+            state="$(docker inspect -f '{{.State.Health.Status}}' pve-test 2>/dev/null || true)"
+            if [ "$state" = healthy ]; then break; fi
+            if [ "$state" = unhealthy ]; then
+              echo "::error::Proxmox container health check failed"
+              exit 1
+            fi
+            sleep 3
+          done
+          test "$(docker inspect -f '{{.State.Health.Status}}' pve-test)" = healthy
+          docker cp pve-test:/etc/pve/pve-root-ca.pem "$RUNNER_TEMP/pve-root-ca.pem" >/dev/null
+          openssl x509 -in "$RUNNER_TEMP/pve-root-ca.pem" -noout -subject -issuer
+          echo '127.0.0.1 pve-test.local' | sudo tee -a /etc/hosts >/dev/null
+          status="$(curl -sSo /dev/null -w '%{http_code}' \
+            --cacert "$RUNNER_TEMP/pve-root-ca.pem" \
+            --resolve pve-test.local:8006:127.0.0.1 \
+            https://pve-test.local:8006/api2/json/version)"
+          if [ "$status" != 200 ] && [ "$status" != 401 ]; then
+            echo "::error::Proxmox HTTPS API preflight failed (HTTP $status)"
+            exit 1
+          fi
+          umask 077
+          docker exec pve-test cat /run/credentials.json >"$RUNNER_TEMP/pve-credentials.json"
+          jq -e '.token_id | startswith("PVEAPIToken=root@pam!")' \
+            "$RUNNER_TEMP/pve-credentials.json" >/dev/null
+          jq -e '.token_value | length > 8' \
+            "$RUNNER_TEMP/pve-credentials.json" >/dev/null
+          echo "Real Proxmox API ready on verified TLS; test credentials held in private file."
+
+      - name: Start temporary Vault server
+        shell: bash
+        run: |
+          set -euo pipefail
+          vault server -dev \
+            -dev-root-token-id="$VAULT_TOKEN" \
+            -dev-no-store-token \
+            -dev-listen-address="127.0.0.1:8200" \
+            -dev-plugin-dir="$RUNNER_TEMP/plugins" \
+            >"$RUNNER_TEMP/vault.log" 2>&1 &
+          echo "$!" >"$RUNNER_TEMP/vault.pid"
+          for i in $(seq 1 50); do
+            if vault status >/dev/null 2>&1; then break; fi
+            sleep 0.5
+          done
+          vault status >/dev/null
+
+      - name: Test actual Proxmox API authorization and Vault leases
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tests/e2e/real_proxmox_vault_e2e.py \
+            --plugin "$RUNNER_TEMP/plugins/vault-plugin-secrets-proxmox" \
+            --ca "$RUNNER_TEMP/pve-root-ca.pem" \
+            --credentials "$RUNNER_TEMP/pve-credentials.json" \
+            --report "$GITHUB_STEP_SUMMARY"
+
+      - name: Destroy temporary systems and credential files
+        if: always()
+        shell: bash
+        run: |
+          if [ -f "$RUNNER_TEMP/vault.pid" ]; then
+            kill "$(cat "$RUNNER_TEMP/vault.pid")" 2>/dev/null || true
+          fi
+          docker rm -f pve-test >/dev/null 2>&1 || true
+          rm -f "$RUNNER_TEMP/pve-credentials.json" "$RUNNER_TEMP/pve-root-ca.pem"
+          echo "Disposable Proxmox container and Vault process destroyed."
