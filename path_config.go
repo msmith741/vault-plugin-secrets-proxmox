@@ -44,7 +44,7 @@ func authMethod(c *proxmoxConfig) string {
 }
 
 var (
-	safePVEUser = regexp.MustCompile("^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$")
+	safePVEUser  = regexp.MustCompile("^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$")
 	safePVERealm = regexp.MustCompile("^[A-Za-z][A-Za-z0-9._-]{0,63}$")
 )
 
