@@ -15,6 +15,8 @@ This guide is for contributors and operators building or validating this Vault P
 | `client.go` | HTTPS Proxmox connection and issuer token authentication |
 | `*_test.go` | Unit, mock HTTPS Proxmox API, and optional acceptance tests |
 | `.github/workflows/validate-go.yml` | GitHub Actions validation |
+| `.github/workflows/test-ephemeral-vault.yml` | Ephemeral real Vault server and simulated Proxmox API E2E validation |
+| `tests/e2e/` | Synthetic HTTPS Proxmox service and black-box Vault CLI harness |
 | `.github/workflows/release.yml` | Version-tag-triggered release workflow |
 | `.goreleaser.yaml` | GoReleaser v2 build and artifact configuration |
 
@@ -59,6 +61,8 @@ Build/target architecture must match the Vault node. The supplied release config
 ### Acceptance tests (opt-in and potentially mutating)
 
 The historical acceptance suite is gated behind `VAULT_ACC=1` and depends on additional `VAULT_PROXMOX_*` environment variables. **Never set `VAULT_ACC=1` in ordinary CI or against production Proxmox.** These tests can create and delete tokens and may leave credentials behind if cleanup fails. Before executing, review `backend_test.go`, use dedicated disposable accounts, verify all target IDs, and obtain explicit authorization from the environment owner.
+
+The first gate is now automated on GitHub-hosted runners; see [Ephemeral integration testing](testing.md) for exact coverage and manual reruns.
 
 Separate acceptance into two gates:
 
