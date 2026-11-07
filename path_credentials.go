@@ -60,11 +60,14 @@ func (b *proxmoxBackend) createToken(ctx context.Context, s logical.Storage, rol
 	if err := validateIssuerTarget(config, role.User, role.Realm); err != nil {
 		return nil, err
 	}
+	if err := validateIssuanceConfig(config); err != nil {
+		return nil, err
+	}
 	// Use the exact issuer configuration snapshot that passed the same-user
 	// identity check. Calling getClient() here would reload or return a
 	// possibly stale cached issuer if config changed concurrently, allowing a
 	// privileged cross-user issuer to slip between validation and API call.
-	client, err := newClient(config)
+	client, err := newClientWithContext(ctx, config)
 	if err != nil {
 		return nil, err
 	}
@@ -73,7 +76,7 @@ func (b *proxmoxBackend) createToken(ctx context.Context, s logical.Storage, rol
 	// Fine-grained per-token ACL assignment is not yet implemented.
 	token, err := createToken(ctx, client, role.User, role.Realm, expire, false)
 	if err != nil {
-		return nil, fmt.Errorf("error creating Proxmox API token for role %q: %w", role.Name, err)
+		return nil, fmt.Errorf("Proxmox API token creation failed for role %q; check Proxmox audit logs", role.Name)
 	}
 	if token == nil {
 		return nil, fmt.Errorf("Proxmox API returned no token")

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	neturl "net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -42,6 +43,129 @@ func authMethod(c *proxmoxConfig) string {
 	return "token"
 }
 
+var (
+	safePVEUser = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}package proxmox
+
+import (
+	"context"
+	"crypto/x509"
+	"errors"
+	"fmt"
+	neturl "net/url"
+	"regexp"
+	"strings"
+	"time"
+
+	"github.com/hashicorp/vault/sdk/framework"
+	"github.com/hashicorp/vault/sdk/logical"
+)
+
+const (
+	configStoragePath = "config"
+)
+
+type proxmoxConfig struct {
+	User               string        `json:"user"`
+	Realm              string        `json:"realm"`
+	ApiTokenID         string        `json:"token_id"`
+	ApiTokenSecret     string        `json:"token_secret"`
+	AuthMethod         string        `json:"auth_method"`
+	Password           string        `json:"password"`
+	ApiURL             string        `json:"proxmox_url"`
+	SkipCertValidation bool          `json:"insecure_skip_tls_verify"`
+	HTTPHeaders        string        `json:"http_headers"`
+	ProxyServer        string        `json:"proxy_server"`
+	TaskTimeout        time.Duration `json:"timeout"`
+	CACertPEM          string        `json:"ca_cert_pem"`
+}
+
+// authMethod preserves decoding of existing token-backed mount configs.
+// New production mounts should use password authentication with a dedicated
+// non-admin PVE-realm user (the same identity that owns issued tokens).
+func authMethod(c *proxmoxConfig) string {
+	if c != nil && c.AuthMethod != "" {
+		return c.AuthMethod
+	}
+	return "token"
+}
+
+)
+	safePVERealm = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9._-]{0,63}package proxmox
+
+import (
+	"context"
+	"crypto/x509"
+	"errors"
+	"fmt"
+	neturl "net/url"
+	"regexp"
+	"strings"
+	"time"
+
+	"github.com/hashicorp/vault/sdk/framework"
+	"github.com/hashicorp/vault/sdk/logical"
+)
+
+const (
+	configStoragePath = "config"
+)
+
+type proxmoxConfig struct {
+	User               string        `json:"user"`
+	Realm              string        `json:"realm"`
+	ApiTokenID         string        `json:"token_id"`
+	ApiTokenSecret     string        `json:"token_secret"`
+	AuthMethod         string        `json:"auth_method"`
+	Password           string        `json:"password"`
+	ApiURL             string        `json:"proxmox_url"`
+	SkipCertValidation bool          `json:"insecure_skip_tls_verify"`
+	HTTPHeaders        string        `json:"http_headers"`
+	ProxyServer        string        `json:"proxy_server"`
+	TaskTimeout        time.Duration `json:"timeout"`
+	CACertPEM          string        `json:"ca_cert_pem"`
+}
+
+// authMethod preserves decoding of existing token-backed mount configs.
+// New production mounts should use password authentication with a dedicated
+// non-admin PVE-realm user (the same identity that owns issued tokens).
+func authMethod(c *proxmoxConfig) string {
+	if c != nil && c.AuthMethod != "" {
+		return c.AuthMethod
+	}
+	return "token"
+}
+
+)
+)
+
+// Reject ambiguous identity separators or path/meta characters before SDK
+// construction. Proxmox user@realm is the security principal.
+func validatePVEIdentity(user, realm string) error {
+	if !safePVEUser.MatchString(user) || !safePVERealm.MatchString(realm) {
+		return fmt.Errorf("Proxmox identity must contain a valid user and realm without URL or account separators")
+	}
+	return nil
+}
+
+// New credential issuance never permits legacy insecure connection settings.
+// Historical lease revocations may still use an old mount configuration until
+// all outstanding external tokens are revoked or natively expired.
+func validateIssuanceConfig(c *proxmoxConfig) error {
+	if err := validateConfig(c); err != nil {
+		return err
+	}
+	if c.SkipCertValidation {
+		return fmt.Errorf("TLS verification cannot be disabled for new credentials")
+	}
+	if strings.TrimSpace(c.HTTPHeaders) != "" {
+		return fmt.Errorf("custom HTTP headers are unsupported for new credentials")
+	}
+	if strings.TrimSpace(c.ProxyServer) != "" {
+		return fmt.Errorf("custom proxy servers are unsupported for new credentials")
+	}
+	return nil
+}
+
 // No cross-user token issuance is permitted by this plugin. Granting
 // PVEUserAdmin at /access permits minting root@pam tokens on PVE 9.2.2.
 func validateIssuerTarget(c *proxmoxConfig, user, realm string) error {
@@ -62,8 +186,8 @@ func validateConfig(c *proxmoxConfig) error {
 	if c == nil {
 		return fmt.Errorf("issuer configuration is missing")
 	}
-	if strings.TrimSpace(c.User) == "" || strings.TrimSpace(c.Realm) == "" {
-		return fmt.Errorf("issuer user and realm must be set")
+	if err := validatePVEIdentity(c.User, c.Realm); err != nil {
+		return err
 	}
 	switch authMethod(c) {
 	case "token":
@@ -233,6 +357,13 @@ func (b *proxmoxBackend) pathConfigExistenceCheck(ctx context.Context, req *logi
 	return out != nil, nil
 }
 
+func redactedLegacySetting(setting string) string {
+	if setting == "" {
+		return ""
+	}
+	return "[redacted: legacy setting configured]"
+}
+
 func (b *proxmoxBackend) pathConfigRead(ctx context.Context, req *logical.Request, data *framework.FieldData) (*logical.Response, error) {
 	c, err := getConfig(ctx, req.Storage)
 	if err != nil {
@@ -250,8 +381,10 @@ func (b *proxmoxBackend) pathConfigRead(ctx context.Context, req *logical.Reques
 			"auth_method":              authMethod(c),
 			"proxmox_url":              c.ApiURL,
 			"insecure_skip_tls_verify": c.SkipCertValidation,
-			"http_headers":             c.HTTPHeaders,
-			"proxy_server":             c.ProxyServer,
+			// Legacy overrides can contain embedded access credentials.
+			// Never echo them in an operator-readable configuration response.
+			"http_headers":             redactedLegacySetting(c.HTTPHeaders),
+			"proxy_server":             redactedLegacySetting(c.ProxyServer),
 			"timeout":                  int(c.TaskTimeout.Seconds()),
 		},
 	}, nil
@@ -342,7 +475,7 @@ func (b *proxmoxBackend) pathConfigWrite(ctx context.Context, req *logical.Reque
 		config.TaskTimeout = time.Duration(data.GetDefaultOrZero("timeout").(int)) * time.Second
 	}
 
-	if err := validateConfig(config); err != nil {
+	if err := validateIssuanceConfig(config); err != nil {
 		return logical.ErrorResponse(err.Error()), nil
 	}
 	entry, err := logical.StorageEntryJSON(configStoragePath, config)
@@ -390,8 +523,8 @@ func getConfig(ctx context.Context, s logical.Storage) (*proxmoxConfig, error) {
 const pathConfigHelpSynopsis = `Configure the Proxmox backend.`
 
 const pathConfigHelpDescription = `
-The Proxmox secrets backend requires credentials for managing
-API tokens using the Proxmox API.
-
-You must sign in to your Proxmox cluster and create an API token and give that token to this secrets engine,
-which will be used to mint new short lived tokens.`
+The Proxmox secrets backend issues short-lived tokens only for the configured
+same-user issuer. Use a dedicated restricted PVE-realm account and
+auth_method=password for fresh ticket authentication. Legacy issuer tokens
+can be used only with the same Proxmox user. TLS verification is mandatory
+for new issuance; custom headers and proxy settings are not permitted.`
