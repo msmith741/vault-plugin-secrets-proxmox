@@ -220,36 +220,66 @@ def run(args):
     attempt = pve.token("POST", TARGET_USER, test_id, auth=restricted_auth,
                         fields={"expire": int(time.time()) + 300, "privsep": 0})
     check(attempt[0] in (401, 403), "unprivileged issuer cannot mint for other user")
-    # Apply a narrowly scoped standard Proxmox role on the same test realm.
-    docker("pveum", "acl", "modify", "/access/realm/pve",
-           "--user", ISSUER_USER, "--role", "PVEUserAdmin")
-    delegation = pve.token("POST", TARGET_USER, test_id, auth=restricted_auth,
-                           fields={"expire": int(time.time()) + 300, "privsep": 0})
-    if delegation[0] == 200:
-        print("INFO: realm-scoped issuer created cross-user token", flush=True)
-        report.append("- Restricted issuer at /access/realm/pve: cross-user issuance allowed")
-        check(pve.token("DELETE", TARGET_USER, test_id, auth=restricted_auth)[0] == 200,
-              "realm-scoped issuer can delete the cross-user token")
-        # Verify the SAME issuer behavior when called through our Vault plugin.
+    # Test progressively broader delegated scopes, RECORDING any privilege
+    # expansion. A broadly privileged issuer is not production approval.
+    probes = [
+        ("realm PVEUserAdmin", "/access/realm/pve", "PVEUserAdmin"),
+        ("realm Realm.AllocateUser", "/access/realm/pve", "CITokenIssuer"),
+        ("global PVEUserAdmin", "/access", "PVEUserAdmin"),
+    ]
+    delegated_scope = None
+    for label, acl_path, acl_role in probes:
+        if acl_role == "CITokenIssuer":
+            docker("pveum", "role", "add", "CITokenIssuer",
+                   "--privs", "Realm.AllocateUser")
+        docker("pveum", "acl", "modify", acl_path,
+               "--user", ISSUER_USER, "--role", acl_role)
+        delegation = pve.token(
+            "POST", TARGET_USER, test_id, auth=restricted_auth,
+            fields={"expire": int(time.time()) + 300, "privsep": 0},
+        )
+        report.append(f"- Cross-user issuer with {label}: HTTP {delegation[0]}")
+        if delegation[0] == 200:
+            delegated_scope = label
+            print(f"INFO: cross-user issuer permitted with {label}", flush=True)
+            check(pve.token("DELETE", TARGET_USER, test_id, auth=restricted_auth)[0] == 200,
+                  f"delegated issuer can delete token under {label}")
+            break
+        check(delegation[0] in (401, 403),
+              f"issuer scope {label} correctly reported a permission denial")
+
+    if delegated_scope:
+        # A successful delegated probe must also work through the same
+        # constrained issuer identity configured on a separate Vault mount.
         second = "pve-restricted-ci"
         setup_vault(args.plugin, pve, args.ca, ISSUER_USER,
                     ("bootstrap", issuer_info["value"]), second)
         role(second, "workload", TARGET_USER)
         check_result, _ = issue(second, "workload")
         vault("lease", "revoke", "-sync", check_result["lease_id"])
-        check(True, "restricted cross-user issuer completes Vault lease lifecycle")
+        check(True, "delegated issuer completes full Vault lease lifecycle")
+        if delegated_scope == "global PVEUserAdmin":
+            print("SECURITY WARNING: cross-user token management needed global /access user administration",
+                  flush=True)
+            report.append("- Issuer privilege boundary: **global /access role required; review before production**")
     else:
-        print(f"SECURITY GATE: delegated issuer cannot create cross-user tokens (HTTP {delegation[0]})",
+        print("SECURITY GATE: cross-user token issuance remained denied with tested scopes",
               flush=True)
-        report.append(
-            f"- Restricted issuer at /access/realm/pve: cross-user issuance denied (HTTP {delegation[0]}); further issuer design required"
-        )
+        report.append("- Restricted issuer: **not proven viable; issuer design must be revised**")
 
     vault("lease", "revoke", "-sync", dep["lease_id"])
     check(pve.permissions(generated_auth)[0] in (401, 403),
           "Vault lease revocation invalidates the actual Proxmox token")
-    check(pve.token("GET", TARGET_USER, token["token_id"])[0] == 404,
-          "revoked token is removed from Proxmox user token inventory")
+    # Proxmox versions differ in the response to GET for a missing token.
+    # Verify absence from the actual token inventory instead of assuming 404.
+    user_q = urllib.parse.quote(TARGET_USER, safe="")
+    listing_status, listing = pve.call("GET", f"/access/users/{user_q}/token")
+    check(listing_status == 200 and isinstance(listing.get("data"), list),
+          "Proxmox user token inventory is readable")
+    check(not any(
+        item.get("tokenid") == token["token_id"]
+        for item in listing["data"] if isinstance(item, dict)
+    ), "revoked token is absent from actual Proxmox token inventory")
 
     # Native expiry is independent of Vault's lease expiration manager.
     ephemeral = "ci-native-expiry"
