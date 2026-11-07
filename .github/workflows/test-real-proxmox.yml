@@ -33,8 +33,8 @@ jobs:
       VAULT_ADDR: "http://127.0.0.1:8200"
       VAULT_TOKEN: "ci-only-vault-dev-token"
       VAULT_VERSION: "1.21.4"
-      # Third-party, test-only image with public credentials. Pin digest after validation.
-      PVE_IMAGE: "ghcr.io/client-api/proxmox-docker/pve-test:9.2.2"
+      # Third-party test image with public credentials; pinned OCI digest (PVE 9.2.2).
+      PVE_IMAGE: "ghcr.io/client-api/proxmox-docker/pve-test@sha256:d40381c1d096ffb419e48ea5c47786dab544b0de58bb845332d0892ab8a6695e"
       NO_PROXY: "127.0.0.1,localhost,pve-test.local"
 
     steps:
@@ -99,8 +99,11 @@ jobs:
             sleep 3
           done
           test "$(docker inspect -f '{{.State.Health.Status}}' pve-test)" = healthy
-          docker cp pve-test:/etc/pve/pve-root-ca.pem "$RUNNER_TEMP/pve-root-ca.pem" >/dev/null
-          openssl x509 -in "$RUNNER_TEMP/pve-root-ca.pem" -noout -subject -issuer
+          # This minimal test-only Proxmox container presents a generated
+          # self-signed leaf certificate; it does not export pve-root-ca.pem.
+          # Trust exactly the observed leaf, checking its hostname below.
+          openssl s_client -connect 127.0.0.1:8006             -servername pve-test.local -showcerts </dev/null 2>/dev/null             | openssl x509 -out "$RUNNER_TEMP/pve-root-ca.pem"
+          openssl x509 -in "$RUNNER_TEMP/pve-root-ca.pem"             -noout -subject -issuer -ext subjectAltName
           echo '127.0.0.1 pve-test.local' | sudo tee -a /etc/hosts >/dev/null
           status="$(curl -sSo /dev/null -w '%{http_code}' \
             --cacert "$RUNNER_TEMP/pve-root-ca.pem" \
