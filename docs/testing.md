@@ -20,7 +20,7 @@ The runner has no need for repository secrets, a VPN, your Vault address, a Prox
 4. It starts a real **Vault 1.21.4** process in disposable development mode on `127.0.0.1:8200`. Vault's plugin directory contains the newly compiled binary.
 5. The harness registers the plugin with its SHA-256, mounts the secrets engine, configures an issuer with the local CA, creates Vault roles and an isolated consumer ACL.
 6. It reads a generated Proxmox token through a restricted Vault identity and checks the returned lease, role mapping, native expiration and mock authentication.
-7. It changes the underlying Vault role and revokes the original lease, verifying the original Proxmox token has been deleted. A second token is allowed to expire naturally after a one-minute Vault TTL, confirming Vault's expiration manager also deletes it automatically and that lease renewal is refused. It also tests a simulated Proxmox **403**, refusal of `root@pam` issuance and rejection of an untrusted HTTPS certificate.
+7. It changes the underlying Vault role and revokes the original lease, verifying the original Proxmox token has been deleted. A second token is allowed to expire naturally after a one-minute Vault TTL, confirming Vault's expiration manager also deletes it automatically and that lease renewal is refused. It also verifies a cross-user request is rejected locally before reaching the simulated API, refusal of `root@pam` issuance and rejection of an untrusted HTTPS certificate.
 8. The workflow attempts to stop both local processes even on failure, and the disposable runner is destroyed.
 
 ## Checks performed
@@ -45,7 +45,7 @@ Normal `go test ./...` and `go test -race ./...` continue to run in a separate v
 
 ## What is NOT established
 
-This test **does not** prove real Proxmox permissions, including whether the issuer token can create and delete a token for another user under narrowly scoped permissions. It also does not prove that generated tokens cannot mint replacement credentials to bypass their TTL, nor does it test any actual deployment, raw-disk passthrough, Proxmox cluster behavior or a durable/HA Vault installation.
+This **mock-based test alone** does not prove real Proxmox ACL or password-ticket behavior. Those operations have separate coverage in the [real Proxmox VE 9.2.2 container suite](real-proxmox-testing.md). Neither test establishes behavior across all Proxmox versions, a production cluster, raw-disk passthrough, durable Vault HA, or every possible account permission configuration.
 
 Additional work should include fault injection for delayed revocation, simulated Vault process restarts, issuer rotation, orphan-token handling and Proxmox version compatibility. The real permission boundary remains a **production release blocker**.
 
@@ -54,3 +54,19 @@ Review the [security checklist](security.md#pre-production-acceptance-checklist)
 ## Local execution
 
 The suite can also run on an isolated local machine using its checked-in workflow steps. It requires a Vault binary, Go, Python 3, OpenSSL, SHA-256 checksum support and the source repository. Do not use a real `VAULT_ADDR` or real credentials when executing the harness. A separately started Vault dev process with `-dev-plugin-dir` and the local HTTPS mock server are prerequisites.
+
+## Real Proxmox authorization tests
+
+In addition to the simulated Proxmox workflow above, GitHub Actions runs
+[real Proxmox VE 9.2.2 authorization tests](real-proxmox-testing.md)
+using a disposable privileged container. Separate restricted users,
+each with an independent Vault mount and password-ticket issuer, have
+successfully created and revoked real expiring tokens.
+
+The suite also confirms that the plugin blocks cross-user token issuance,
+even when a deliberately overprivileged issuer could mint an authenticating
+`root@pam` token **directly through the Proxmox API**. A restricted workload
+token was denied the ability to mint another token (HTTP 403).
+
+The documented CI findings do not replace independent acceptance testing
+on the intended production Proxmox and Vault versions.

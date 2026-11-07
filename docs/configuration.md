@@ -1,207 +1,184 @@
 # Configuration and API reference
 
-This is a reference for the plugin **as currently implemented**. All paths below are relative to a Vault mount named `proxmox/`. If the engine is enabled at another path, replace that prefix. There is no automatic registration of Proxmox roles, accounts or ACLs.
+All paths below are relative to a Vault secrets-engine mount. Example mount names `proxmox-deploy/` and `proxmox-images/` correspond to **different dedicated Proxmox identities**; the binary is registered once but each mount maintains its own configuration and leases.
 
 > [!WARNING]
-> The `proxmox/config` endpoint contains an issuer credential, and `proxmox/creds/*` responses contain newly generated credentials. Treat both paths as sensitive. Issued tokens currently inherit **all** rights of their Proxmox user.
+> Cross-user token issuance is **disabled**. A role's Proxmox `user` and `realm` must match the configured issuer's `user` and `realm` for its mount. This is enforced **before Proxmox API calls** even if the issuer credential is overprivileged. Do not grant global `PVEUserAdmin` on `/access`; the real-Proxmox test showed that issuer can mint authenticating `root@pam` tokens.
 
-## Vault endpoint table
+## API endpoints
 
-| Method / Vault CLI | Path | Description |
+| Vault CLI | Mount-relative path | Behavior |
 |---|---|---|
-| `vault write` | `proxmox/config` | Create or update the mount's issuer API settings |
-| `vault read` | `proxmox/config` | Read non-sensitive config fields; token secret omitted |
-| `vault delete` | `proxmox/config` | Delete issuer settings; active lease revocation can break |
-| `vault write` | `proxmox/role/<name>` | Create or update a role |
-| `vault read` | `proxmox/role/<name>` | Inspect role mapping and lifetime |
-| `vault delete` | `proxmox/role/<name>` | Delete role (affects future issuance) |
-| `vault list` | `proxmox/role` | List role names |
-| `vault read` | `proxmox/creds/<name>` | **Create a new token** and return its Vault lease |
-| `vault lease revoke` | `<lease_id>` | Revoke the Vault lease and call Proxmox token deletion |
+| `vault write` | `config` | Store/update mount's issuer credential and TLS settings |
+| `vault read` | `config` | Read non-secret issuer settings; password and API-token secret omitted |
+| `vault delete` | `config` | Delete issuer configuration (may break old lease revocation) |
+| `vault write` | `role/<name>` | Create or update a named target role |
+| `vault read` | `role/<name>` | Read role identity and TTL settings |
+| `vault delete` | `role/<name>` | Delete role (affects future issuance only) |
+| `vault list` | `role` | List roles |
+| `vault read` | `creds/<name>` | **Create** a temporary Proxmox token and lease |
+| `vault lease revoke` | `<exact_lease_id>` | Invoke target-token deletion |
 
-These are plugin-specific paths. Vault's system endpoints manage the **catalog** (`sys/plugins/catalog`), **mount** (`sys/mounts`), **ACLs** and **leases**. Do not grant these broad system capabilities to ordinary credential consumers.
+The Vault mount's issuer identity is **not** exposed to consumers as a credential. Each response from `creds/<name>` contains a *new target token*.
 
-## Issuer configuration: `proxmox/config`
+## Issuer configuration: `<mount>/config`
 
-Exactly **one issuer configuration** exists per mount. Every role at that mount uses the configured Proxmox issuer credential to create and delete target tokens.
-
-| Field | Type | Required | Description |
+| Field | Type | Default | Meaning |
 |---|---|---|---|
-| `user` | String | Yes | Issuer account name, without realm |
-| `realm` | String | Yes | Issuer's Proxmox authentication realm |
-| `token_id` | String | Yes | Issuer's API token name, without `user@realm!` prefix |
-| `token_secret` | String | Yes | **Secret** value returned once at Proxmox token creation |
-| `proxmox_url` | HTTPS URL | Yes | Exact `https://<host>:8006/api2/json` endpoint |
-| `insecure_skip_tls_verify` | Boolean | No; default false | **Unsafe** legacy bypass; do not enable in production |
-| `ca_cert_pem` | String | No | PEM-encoded CA certificates for private TLS trust |
-| `timeout` | Integer seconds | No; default 120 | API client operation timeout, permitted 1–300 seconds |
-| `http_headers` | String | No | Extra HTTP headers accepted by underlying Proxmox client |
-| `proxy_server` | String | No | HTTP proxy passed to underlying client; restrict use |
+| `auth_method` | String | `token` for legacy compatibility | `password` (recommended) or `token` |
+| `user` | String | Required | Proxmox issuer account name without realm |
+| `realm` | String | Required | Proxmox authentication realm |
+| `password` | Secret string | Required for `password` | Issuer account password, used to create short-lived tickets |
+| `token_id` | String | Required for `token` | Issuer API-token name without username/realm |
+| `token_secret` | Secret string | Required for `token` | Issuer API-token secret |
+| `proxmox_url` | HTTPS URL | Required | Must end in `/api2/json`; no embedded userinfo/query/fragment |
+| `ca_cert_pem` | String | Optional | PEM certificate authorities for Proxmox HTTPS endpoint |
+| `insecure_skip_tls_verify` | Boolean | `false` | Legacy TLS bypass; **do not enable** in production |
+| `timeout` | Seconds | 120 | API operation timeout, 1–300 seconds |
+| `proxy_server` | String | Empty | Underlying API-client proxy configuration; avoid uncontrolled proxies |
+| `http_headers` | String | Empty | Additional headers; restrict to trusted operator configuration |
 
-The URL must be HTTPS, have a hostname, use path `/api2/json` and contain no userinfo, query string or fragment. Valid PEM is required when `ca_cert_pem` is set. On read, `token_secret` and `ca_cert_pem` are not returned.
+**Credential modes are mutually exclusive.** Configuring a password together with API-token authentication fields is rejected. When changing `auth_method`, the plugin clears the previous mode's credential fields. Existing stored configurations without an `auth_method` field are interpreted as legacy `token` mode for compatibility.
 
-### Example: secure issuer entry
+### Password-ticket mode (recommended)
+
+Proxmox authenticates as the **same** dedicated account that owns the short-lived tokens. The plugin obtains a fresh ticket for each create or revoke operation rather than caching potentially expired tickets.
 
 ```bash
 set +x
-read -r -s -p "Issuer token secret: " ISSUER_TOKEN_SECRET
+read -r -s -p "Restricted Proxmox user password: " ISSUER_PASSWORD
 printf '\n'
-
-printf '%s' "$ISSUER_TOKEN_SECRET" | vault write proxmox/config \
-  user="issuer" realm="pve" token_id="vault-bootstrap" \
-  token_secret=- \
+printf '%s' "$ISSUER_PASSWORD" | vault write proxmox-deploy/config \
+  auth_method=password \
+  user=deployer realm=pve password=- \
   proxmox_url="https://pve.example.invalid:8006/api2/json" \
-  insecure_skip_tls_verify=false \
-  timeout=120 \
-  ca_cert_pem=@/secure/path/pve-ca.pem
+  insecure_skip_tls_verify=false timeout=120
+unset ISSUER_PASSWORD
 
-unset ISSUER_TOKEN_SECRET
-
-vault read proxmox/config
+vault read proxmox-deploy/config
 ```
 
-`token_secret=-` reads only that field from stdin; `ca_cert_pem=@...` reads the local file. Never include a real bootstrap token in a script, command-line argument, Git repository or log. The CA bundle must contain certificates only, not a private key.
+For private TLS, add `ca_cert_pem=@/path/to/trusted-ca.pem` to the `vault write` command. This file is read by the Vault CLI machine and must contain public certificates only.
 
-### Caution: issuer rotation
+The PVE user's password is intentionally **not** returned by `vault read`, but remains protected in Vault's storage. An authorized Vault mount operator can replace it, so that operator must be trusted.
 
-Replacing or deleting `proxmox/config` affects future revocation calls as well as issuance. The lease records the target token's username, realm and ID, but does **not** pin the issuer credential used to create it. Keep enough revocation authority available for all outstanding leases until expiry and independently verify cleanup. See [Operations](operations.md#issuer-rotation).
+### Legacy same-user API-token mode
 
-## Role configuration: `proxmox/role/<name>`
+This mode remains available but **may not** be allowed by Proxmox to create additional tokens for its own user, depending on privileges and API version.
 
-A role is **a named Proxmox target user plus a lifetime policy**. It is not a Proxmox ACL; it does not grant permissions or create users.
+```bash
+set +x
+read -r -s -p "Same-user token secret: " API_TOKEN_SECRET
+printf '\n'
+printf '%s' "$API_TOKEN_SECRET" | vault write proxmox-deploy/config \
+  auth_method=token \
+  user=deployer realm=pve \
+  token_id=bootstrap token_secret=- \
+  proxmox_url="https://pve.example.invalid:8006/api2/json" \
+  insecure_skip_tls_verify=false timeout=120
+unset API_TOKEN_SECRET
+```
 
-| Field | Type | Required | Description |
+No token issuer configuration permits minting for a different user, regardless of the Proxmox permissions held by the issuer token.
+
+## Role configuration: `<mount>/role/<name>`
+
+A role is a TTL policy tied to the **exact configured mount identity**:
+
+| Field | Type | Default | Behavior |
 |---|---|---|---|
-| `name` | Path segment | Yes | Vault role name; used in `creds/<name>` |
-| `user` | String | Yes | Target Proxmox account name |
-| `realm` | String | Yes | Target Proxmox realm |
-| `ttl` | Duration | No; defaults to 30m | Native token lifetime and requested Vault lease TTL; minimum 1m |
-| `max_ttl` | Duration | No; defaults to 1h | Validation limit; must be at least `ttl` and at most 24h |
-| `inherit_user_privileges` | Boolean | Yes; must be true | Explicit acknowledgement that generated token uses `privsep=false` |
+| `user` | String | Required | Must equal mount config `user` for issuance |
+| `realm` | String | Required | Must equal mount config `realm` for issuance |
+| `ttl` | Duration | 30m | Native token expiry and nonrenewable Vault lease duration; minimum 1m |
+| `max_ttl` | Duration | 1h | Role validation ceiling, at least `ttl` and no greater than 24h |
+| `inherit_user_privileges` | Boolean | `false` | **Must be explicitly true**; acknowledges `privsep=false` inheritance |
+| `name` | Path parameter | Required | Vault role name; need not equal Proxmox username |
 
-Rules:
-
-- `ttl` must be finite and at least one minute, no more than `max_ttl`.
-- `max_ttl` must be finite, at least `ttl` and no more than 24 hours.
-- A role targeting `root@pam` is rejected.
-- Roles without explicit acknowledgement are refused; older stored role definitions may require updating before issuance.
-- Issued leases are **not renewable**; changing `max_ttl` does not renew or extend an existing lease.
-- Updating a role affects **new** token requests. Current leases store the target user and realm from issuance; older upstream leases may still depend on a role existing during revoke.
-
-### Example
+Examples:
 
 ```sh
-vault write proxmox/role/build-agent \
-  user="build-agent" realm="pve" \
-  ttl=20m max_ttl=1h \
-  inherit_user_privileges=true
+vault write proxmox-deploy/role/deployer \
+  user=deployer realm=pve \
+  ttl=30m max_ttl=1h inherit_user_privileges=true
 
-vault read proxmox/role/build-agent
-vault list proxmox/role
+vault write proxmox-images/role/image \
+  user=images realm=pve \
+  ttl=20m max_ttl=1h inherit_user_privileges=true
 ```
 
-## Credentials: `proxmox/creds/<name>`
+A role targeting `root@pam` is always rejected. A role targeting another user may exist in old storage, but attempts to read its `creds` path are rejected **before any Proxmox token creation**. Issuer identity matching is exact, not a fuzzy alias.
 
-Every successful **read** creates a new target Proxmox API token. There is no API for requesting an arbitrary target user, token ID, expiration timestamp or extra permissions during credential issuance; those come from the Vault role and issuer's Proxmox permissions.
+## Credential responses: `<mount>/creds/<name>`
 
-Example response, with the secret redacted:
+Each successful `read` issues a new token. Example redacted response:
 
 ```text
-Key                 Value
----                 -----
-lease_id            proxmox/creds/build-agent/<unique-lease>
-lease_duration      1200
-lease_renewable     false
+lease_id:        proxmox-deploy/creds/deployer/<lease>
+lease_duration:  1800
+lease_renewable: false
 
 data:
-  token_id:          <generated-token-name>
-  token_id_full:     build-agent@pve!<generated-token-name>
-  secret:            <generated-secret>
+  token_id:       <unique-generated-token-name>
+  token_id_full:  deployer@pve!<unique-generated-token-name>
+  secret:         <one-time-secret>
 ```
 
-Only the initial Vault response contains the new Proxmox token secret. To authenticate to Proxmox, use:
+The Proxmox authorization header is:
 
 ```text
-Authorization: PVEAPIToken=build-agent@pve!<generated-token-name>=<generated-secret>
+Authorization: PVEAPIToken=deployer@pve!<unique-generated-token-name>=<one-time-secret>
 ```
 
-For OpenTofu providers that accept the Telmate/BPG-style combined token format:
+The Vault consumer must capture the **exact lease ID** and revoke it when the token is no longer needed:
 
-```text
-PROXMOX_VE_API_TOKEN=build-agent@pve!<generated-token-name>=<generated-secret>
+```sh
+vault lease revoke -sync "<LEASE_ID>"
 ```
 
-Provider environment variable names may vary; consult the exact provider you use.
+Native Proxmox expiry is a fallback for runner crashes and revocation errors. The Vault lease cannot be renewed; a different credentials read creates a fresh, independently expiring token.
 
-### Lease guarantees and limits
+## Vault ACLs and multiple issuer mounts
 
-Vault returns a lease ID and `lease_renewable=false`. When the lease is explicitly revoked or reaches its lifetime, Vault invokes the plugin's revoke callback to delete the target token. The generated token also has a native Proxmox expiration timestamp, rounded up to whole-second precision, as a fallback when Vault cannot revoke immediately.
-
-A short token expiration **does not prevent self-minting** if the target account has sufficient user-management permissions. This remains a required acceptance test.
-
-### Example: request and revoke without printing the secret
-
-```bash
-set +x
-response="$(vault read -format=json proxmox/creds/build-agent)" || exit 1
-lease_id="$(jq -r '.lease_id' <<<"$response")"
-echo "Lease created: $lease_id"
-unset response
-
-vault lease lookup "$lease_id"
-vault lease revoke "$lease_id"
-unset lease_id
-```
-
-This example discards the Proxmox secret after issuing it; use a properly secured consumer to work with the full response.
-
-## Vault ACL policies
-
-One **consumer** should have only read permission on its specific role:
+A normal job needs only read access to the credential role it uses:
 
 ```hcl
-path "proxmox/creds/build-agent" {
+path "proxmox-deploy/creds/deployer" {
   capabilities = ["read"]
 }
 ```
 
-Store it as `docs/examples/consumer-policy.hcl` and install it using:
+An independent image job should have:
 
-```sh
-vault policy write proxmox-build-agent docs/examples/consumer-policy.hcl
+```hcl
+path "proxmox-images/creds/image" {
+  capabilities = ["read"]
+}
 ```
 
-A **mount operator** needs separate scoped permissions to manage `config` and `role/`. Use [operator-policy.hcl](examples/operator-policy.hcl) only after reviewing whether that operator should possess issuer-management authority. Token issuance is never part of the operator policy unless explicitly granted.
+Only trusted mount operators should receive config/role management. Neither consumer should receive `sys/*` or issuer config access. Vault ACLs control *who can request a credential*; Proxmox ACLs control *what issued credentials can do*.
 
-Catalog registration, mount lifecycle, version pinning and lease administration use Vault's separate system policies. Never grant `sys/*` to a workload simply to let it read a credential.
-
-## Multiple issuer identities
-
-A single mount has one issuer. Different roles can target different users, but the **same issuer** must have the required token-management permissions for them all. To reduce this authority, use two mounts of the **same registered plugin**:
-
-```sh
-vault secrets enable -path=proxmox-build vault-plugin-secrets-proxmox
-vault secrets enable -path=proxmox-deploy vault-plugin-secrets-proxmox
-```
-
-Configure each independently:
+Use independent mounts for different target Proxmox users:
 
 ```text
-proxmox-build/config   -> issuer-build@pve token
-proxmox-build/role/... -> restricted build identity
+proxmox-deploy/config -> password for deployer@pve
+proxmox-deploy/role/deployer -> deployer@pve
 
-proxmox-deploy/config  -> issuer-deploy@pve token
-proxmox-deploy/role/... -> restricted deploy identity
+proxmox-images/config -> password for images@pve
+proxmox-images/role/image -> images@pve
 ```
 
-For each mount, separately configure issuer credentials, target Proxmox permissions, Vault ACL policies, TTL settings and monitoring. Prefer version-pinned plugin mounts as illustrated in [Deployment](deployment.md#6-enable-and-tune-the-secrets-engine).
+The current code has one issuer per mount, not per role; a multi-role mount is suitable only when every role maps to **the same** Proxmox account. Do not use the globally privileged issuer workaround.
 
-### Proxmox identity is separate from Vault identity
+## Migration and revocation compatibility
 
-Vault authentication and policies decide **who may ask Vault for a token**. Proxmox user ACLs decide **what the token can do once issued**. Neither layer substitutes for the other.
+Existing mounts without `auth_method` decode as legacy token-auth configurations. They can still **revoke previously issued leases**, including leases with different target-user metadata when the stored issuer retains authority. However, **new cross-user issuance is prohibited**. Follow the [migration guide](deployment.md#migrating-from-the-legacy-cross-user-configuration) before removing any old issuer authority.
+
+If the password is rotated while leases are active, update the mount config promptly and verify revocation still works. Do not delete the mount until all outstanding tokens are revoked or confirmed expired. See [Operations](operations.md#issuer-rotation).
 
 ## References
 
-- [Vault ACL policies](https://developer.hashicorp.com/vault/docs/concepts/policies)
-- [Vault leases](https://developer.hashicorp.com/vault/docs/concepts/lease)
+- [Deployment](deployment.md)
+- [Security](security.md)
+- [Real Proxmox integration tests](real-proxmox-testing.md)
+- [Vault policies](https://developer.hashicorp.com/vault/docs/concepts/policies)
 - [Proxmox VE user management](https://pve.proxmox.com/pve-docs/pveum.html)

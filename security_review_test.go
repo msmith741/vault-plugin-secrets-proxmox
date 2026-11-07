@@ -94,7 +94,7 @@ func TestProxmoxTokenLifecycleAgainstMockTLSAPI(t *testing.T) {
 	var issuedID string
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api2/json/access/users/", func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "PVEAPIToken=issuer@pve!bootstrap=mock-issuer-secret" {
+		if r.Header.Get("Authorization") != "PVEAPIToken=tofu-vm@pve!bootstrap=mock-issuer-secret" {
 			http.Error(w, "unexpected issuer", http.StatusUnauthorized)
 			return
 		}
@@ -157,7 +157,7 @@ func TestProxmoxTokenLifecycleAgainstMockTLSAPI(t *testing.T) {
 	}
 	ca := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw})
 	cfg := &proxmoxConfig{
-		User: "issuer", Realm: "pve", ApiTokenID: "bootstrap",
+		User: "tofu-vm", Realm: "pve", ApiTokenID: "bootstrap",
 		ApiTokenSecret: "mock-issuer-secret", ApiURL: server.URL + "/api2/json",
 		CACertPEM: string(ca), TaskTimeout: 10 * time.Second,
 	}

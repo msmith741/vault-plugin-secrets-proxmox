@@ -22,12 +22,39 @@ type proxmoxConfig struct {
 	Realm              string        `json:"realm"`
 	ApiTokenID         string        `json:"token_id"`
 	ApiTokenSecret     string        `json:"token_secret"`
+	AuthMethod         string        `json:"auth_method"`
+	Password           string        `json:"password"`
 	ApiURL             string        `json:"proxmox_url"`
 	SkipCertValidation bool          `json:"insecure_skip_tls_verify"`
 	HTTPHeaders        string        `json:"http_headers"`
 	ProxyServer        string        `json:"proxy_server"`
 	TaskTimeout        time.Duration `json:"timeout"`
 	CACertPEM          string        `json:"ca_cert_pem"`
+}
+
+// authMethod preserves decoding of existing token-backed mount configs.
+// New production mounts should use password authentication with a dedicated
+// non-admin PVE-realm user (the same identity that owns issued tokens).
+func authMethod(c *proxmoxConfig) string {
+	if c != nil && c.AuthMethod != "" {
+		return c.AuthMethod
+	}
+	return "token"
+}
+
+// No cross-user token issuance is permitted by this plugin. Granting
+// PVEUserAdmin at /access permits minting root@pam tokens on PVE 9.2.2.
+func validateIssuerTarget(c *proxmoxConfig, user, realm string) error {
+	if c == nil {
+		return fmt.Errorf("issuer is not configured")
+	}
+	if c.User != user || c.Realm != realm {
+		return fmt.Errorf("cross-user token issuance is disabled: configure a separate Vault mount with issuer matching the target user")
+	}
+	if c.User == "root" && c.Realm == "pam" {
+		return fmt.Errorf("root@pam issuer is prohibited for dynamic token issuance")
+	}
+	return nil
 }
 
 // Validate the privileged issuer endpoint before it can be persisted.
@@ -38,8 +65,23 @@ func validateConfig(c *proxmoxConfig) error {
 	if strings.TrimSpace(c.User) == "" || strings.TrimSpace(c.Realm) == "" {
 		return fmt.Errorf("issuer user and realm must be set")
 	}
-	if strings.TrimSpace(c.ApiTokenID) == "" || strings.TrimSpace(c.ApiTokenSecret) == "" {
-		return fmt.Errorf("issuer token_id and token_secret must be set")
+	switch authMethod(c) {
+	case "token":
+		if strings.TrimSpace(c.ApiTokenID) == "" || strings.TrimSpace(c.ApiTokenSecret) == "" {
+			return fmt.Errorf("issuer token_id and token_secret must be set for token authentication")
+		}
+		if c.Password != "" {
+			return fmt.Errorf("password and token authentication must not be combined")
+		}
+	case "password":
+		if c.Password == "" {
+			return fmt.Errorf("issuer password is required for password authentication")
+		}
+		if c.ApiTokenID != "" || c.ApiTokenSecret != "" {
+			return fmt.Errorf("issuer API token credentials must not be combined with password authentication")
+		}
+	default:
+		return fmt.Errorf("auth_method must be token or password")
 	}
 	endpoint, err := neturl.Parse(c.ApiURL)
 	if err != nil || endpoint.Scheme != "https" || endpoint.Host == "" ||
@@ -79,10 +121,22 @@ func pathConfig(b *proxmoxBackend) *framework.Path {
 					Name: "Realm",
 				},
 			},
+			"auth_method": {
+				Type:        framework.TypeString,
+				Description: "Issuer authentication: password (same-user self-service, recommended) or token (same-user only). Existing token mounts remain compatible.",
+			},
+			"password": {
+				Type:        framework.TypeString,
+				Description: "Secret password for dedicated Proxmox user, used for per-request session tickets. Required with auth_method=password.",
+				DisplayAttrs: &framework.DisplayAttributes{
+					Name:      "Issuer password",
+					Sensitive: true,
+				},
+			},
 			"token_id": {
 				Type:        framework.TypeString,
-				Description: "API Token ID e.g. mytesttoken (excluding '<user>@<realm>!' which are set separately)",
-				Required:    true,
+				Description: "API Token ID for auth_method=token (without username and realm).",
+				Required:    false,
 				DisplayAttrs: &framework.DisplayAttributes{
 					Name:      "API Token ID",
 					Sensitive: true,
@@ -90,8 +144,8 @@ func pathConfig(b *proxmoxBackend) *framework.Path {
 			},
 			"token_secret": {
 				Type:        framework.TypeString,
-				Description: "The secret uuid corresponding to a TokenID",
-				Required:    true,
+				Description: "API token secret for auth_method=token; do not set with password authentication.",
+				Required:    false,
 				DisplayAttrs: &framework.DisplayAttributes{
 					Name:      "API Token Secret",
 					Sensitive: true,
@@ -193,6 +247,7 @@ func (b *proxmoxBackend) pathConfigRead(ctx context.Context, req *logical.Reques
 			"user":                     c.User,
 			"realm":                    c.Realm,
 			"token_id":                 c.ApiTokenID,
+			"auth_method":              authMethod(c),
 			"proxmox_url":              c.ApiURL,
 			"insecure_skip_tls_verify": c.SkipCertValidation,
 			"http_headers":             c.HTTPHeaders,
@@ -229,16 +284,27 @@ func (b *proxmoxBackend) pathConfigWrite(ctx context.Context, req *logical.Reque
 		return nil, fmt.Errorf("missing realm in configuration")
 	}
 
+	if mode, ok := data.GetOk("auth_method"); ok {
+		next := mode.(string)
+		if next != authMethod(config) {
+			switch next {
+			case "password":
+				config.ApiTokenID = ""
+				config.ApiTokenSecret = ""
+			case "token":
+				config.Password = ""
+			}
+		}
+		config.AuthMethod = next
+	}
+	if password, ok := data.GetOk("password"); ok {
+		config.Password = password.(string)
+	}
 	if tokenID, ok := data.GetOk("token_id"); ok {
 		config.ApiTokenID = tokenID.(string)
-	} else if !ok && createOperation {
-		return nil, fmt.Errorf("missing token_id in configuration")
 	}
-
 	if tokenSecret, ok := data.GetOk("token_secret"); ok {
 		config.ApiTokenSecret = tokenSecret.(string)
-	} else if !ok && createOperation {
-		return nil, fmt.Errorf("missing token_secret in configuration")
 	}
 
 	apiURL, ok := data.GetOk("proxmox_url")

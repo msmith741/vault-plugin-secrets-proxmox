@@ -53,7 +53,18 @@ func (b *proxmoxBackend) createToken(ctx context.Context, s logical.Storage, rol
 	if err != nil {
 		return nil, err
 	}
-	client, err := b.getClient(ctx, s)
+	config, err := getConfig(ctx, s)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateIssuerTarget(config, role.User, role.Realm); err != nil {
+		return nil, err
+	}
+	// Use the exact issuer configuration snapshot that passed the same-user
+	// identity check. Calling getClient() here would reload or return a
+	// possibly stale cached issuer if config changed concurrently, allowing a
+	// privileged cross-user issuer to slip between validation and API call.
+	client, err := newClient(config)
 	if err != nil {
 		return nil, err
 	}
