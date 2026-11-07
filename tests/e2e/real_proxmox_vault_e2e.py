@@ -282,8 +282,13 @@ def run(args):
                     )
                     try:
                         if other_user == "root@pam":
+                            root_secret = (probe[1].get("data") or {}).get("value")
+                            check(bool(root_secret), "delegated issuer received root token secret")
+                            root_auth = token_header("root@pam!" + probe_id, root_secret)
+                            check(pve.permissions(root_auth)[0] == 200,
+                                  "delegated issuer's root token authenticates to actual Proxmox")
                             critical.append(
-                                "non-root delegated issuer can create a root@pam token"
+                                "non-root delegated issuer minted an authenticating root@pam API token"
                             )
                     finally:
                         check(
@@ -337,11 +342,14 @@ def run(args):
     report.append("- Vault lease revocation: passed")
     report.append("- Separate image/deployment identities: passed")
     report.append("- Real Proxmox TLS certificate verification: passed")
-    report.append("- Self-mint security gate: " + ("**BLOCKED**" if critical else "passed"))
+    report.append("- Restricted workload self-mint security gate: passed (HTTP 403)")
+    report.append("- Delegated issuer privilege-escalation gate: " + (
+        "**CRITICAL BLOCKER: minted root@pam token**" if critical else "no root-token minting observed"
+    ))
     summary = "## Proxmox VE container integration results\n\n" + "\n".join(report) + "\n"
     Path(args.report).write_text(summary)
     if critical:
-        raise TestError("real Proxmox allows temporary token to mint replacement credential")
+        raise TestError("; ".join(critical))
     print("SUCCESS: real containerized Proxmox API integration and security checks passed",
           flush=True)
 

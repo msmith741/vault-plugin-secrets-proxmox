@@ -32,7 +32,7 @@ The issuer-probe outcomes are recorded in the GitHub Actions **job summary** wit
 ## Limitations
 
 - This is Proxmox software running within a privileged container, **not** a normal Proxmox host installation. It exercises actual token authorization, but not production networking, host capabilities, real VM provisioning, cluster roles, storage or device passthrough.
-- An image tag is not a supply-chain integrity guarantee. Pin an audited OCI image digest before making this mandatory for other contributors. Use only GitHub-hosted ephemeral runners, with read-only GitHub permissions and no user-supplied secrets.
+- The workflow pins the test-only image to OCI digest `sha256:d40381c1d096ffb419e48ea5c47786dab544b0de58bb845332d0892ab8a6695e` (PVE 9.2.2); pinning preserves reproducibility but is **not** a third-party security audit. Use only GitHub-hosted ephemeral runners, with read-only GitHub permissions and no user-supplied secrets.
 - A test demonstrating permissive cross-user issuance does not automatically mean the issuer can be given sufficient privileges without broad user-management authority in production. Audit the actual Proxmox ACLs and supported scopes.
 - A successful test against PVE 9.2.2 does not establish behavior on all other PVE versions. Test the intended release separately before production rollout.
 
@@ -43,3 +43,28 @@ A **passing** run confirms the program can create and revoke real Proxmox API to
 A **failing** run is intentionally actionable: examine the test summary and distinguish a test harness/setup problem from an actual API permission-security finding. Do not deploy the plugin with privileged issuer accounts while the security gate remains blocked.
 
 For production-release criteria see [Security](security.md#pre-production-acceptance-checklist). This job is additive to, not a replacement for, the existing mock-Vault test and unit tests.
+
+## Confirmed findings on Proxmox VE 9.2.2
+
+The disposable CI integration exercises actual Proxmox token authorization.
+The initial runs showed:
+
+- Vault successfully issues, revokes, and expires real Proxmox API tokens.
+- Temporary workload credentials with only `PVEAuditor` privileges were denied
+  the ability to mint longer-lived replacement tokens (HTTP 403).
+- A separate API-token issuer could **not** create tokens for another user
+  without rights or with the tested realm-scoped `PVEUserAdmin` and
+  `Realm.AllocateUser` permissions (HTTP 403).
+- Granting that issuer `PVEUserAdmin` on global `/access` enabled
+  cross-user token issuance. The issuer could mint tokens for unrelated users,
+  **including `root@pam`**. A non-root issuer must not be granted that role
+  merely to make the plugin work.
+
+The privileged root-token probe is immediately deleted within the isolated
+test container, and the security gate intentionally returns failure for this
+condition. This is a finding about the **chosen issuer permissions**,
+not evidence that an ordinary temporary token can create replacements.
+
+**Production deployment of cross-user token issuance remains blocked**
+until a safer issuer architecture or a verified narrow privilege boundary
+is implemented and independently tested.

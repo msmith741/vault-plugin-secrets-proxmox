@@ -3,7 +3,7 @@
 A community **HashiCorp Vault external secrets-engine plugin** that creates temporary **Proxmox Virtual Environment API tokens**. Vault issues a lease for each generated credential and calls Proxmox to delete the token when that lease is revoked or expires.
 
 > [!WARNING]
-> **Pre-production software.** Unit tests and an ephemeral real-Vault/simulated-Proxmox integration test are available, but successful integration with every Vault and Proxmox version, issuer privilege delegation, and protection against generated tokens creating replacement tokens have **not** been established. Complete the [security acceptance checklist](docs/security.md#pre-production-acceptance-checklist) before deploying with privileged or production infrastructure access.
+> **Pre-production software — issuer escalation confirmed.** Disposable Proxmox VE 9.2.2 tests found a non-root issuer granted `PVEUserAdmin` on `/access` can mint a `root@pam` token. **Do not deploy cross-user issuance with that permission model.** Unit tests, a real-Vault/simulated-Proxmox test and a disposable real-Proxmox test are available; all production authorization assumptions still require a separate review. Complete the [security acceptance checklist](docs/security.md#pre-production-acceptance-checklist) before deploying with privileged or production infrastructure access.
 
 ## Features and constraints
 
@@ -27,6 +27,7 @@ The `inherit_user_privileges=true` role setting is an **explicit acknowledgement
 |---|---|
 | **[Deployment guide](docs/deployment.md)** | Prerequisites; Proxmox identities; compilation; Vault server configuration; plugin registration; live mount/role configuration; credentials; verification |
 | **[Ephemeral integration tests](docs/testing.md)** | One-click GitHub Actions test with real disposable Vault and a local Proxmox HTTPS simulator; no persistent deployment required |
+| **[Real Proxmox authorization test](docs/real-proxmox-testing.md)** | Proxmox VE 9.2.2 container; actual token issuance, revocation, expiration, and security-gate findings |
 | **[Configuration and API reference](docs/configuration.md)** | Every Vault API path, field, response, TTL rule, examples, and Vault ACL policy patterns |
 | **[Security and acceptance](docs/security.md)** | Permission model, threat analysis, release gates, token lifetime implications, safe authentication |
 | **[Operations](docs/operations.md)** | Health checks, issuance/revocation, issuer rotation, upgrades, rollback, HA, backup, alerting, troubleshooting |

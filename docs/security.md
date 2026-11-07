@@ -29,6 +29,24 @@ A generated token may inherit Proxmox account permissions that allow user or tok
 
 Do **not** compensate for a permission failure with an unrestricted Proxmox Administrator role or a root issuer identity. If a restricted issuer cannot mint/delete another account's tokens without excessive privilege, revise the design or do not deploy the dynamic credential workflow.
 
+## Evidence from disposable real-Proxmox testing
+
+A GitHub-hosted test using real **Proxmox VE 9.2.2** authentication services
+established that a non-root issuer granted `PVEUserAdmin` on `/access`
+could create API tokens for unrelated accounts, **including `root@pam`**.
+In the same test, more restricted user-management roles on
+`/access/realm/pve` were denied cross-user token creation (HTTP 403).
+
+The workload token itself could **not** mint a replacement token with its
+read-only permissions (HTTP 403). The critical escalation path is in the
+separately configured *issuer*, not that workload token.
+
+**Do not grant global `PVEUserAdmin` to make cross-user issuance work.**
+The current cross-user issuer design is not production approved. See
+[Real Proxmox authorization test](real-proxmox-testing.md) for reproducible
+test procedures and results. This finding is specific to the tested
+permissions and version; production still requires its own acceptance test.
+
 ## Risk register
 
 | Severity | Risk | Existing control | Still required |

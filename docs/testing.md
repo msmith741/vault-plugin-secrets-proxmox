@@ -54,3 +54,17 @@ Review the [security checklist](security.md#pre-production-acceptance-checklist)
 ## Local execution
 
 The suite can also run on an isolated local machine using its checked-in workflow steps. It requires a Vault binary, Go, Python 3, OpenSSL, SHA-256 checksum support and the source repository. Do not use a real `VAULT_ADDR` or real credentials when executing the harness. A separately started Vault dev process with `-dev-plugin-dir` and the local HTTPS mock server are prerequisites.
+
+## Real Proxmox authorization tests
+
+In addition to the simulated Proxmox workflow above, the repository includes a
+[real Proxmox VE authorization test](real-proxmox-testing.md) using a disposable,
+privileged **Proxmox VE 9.2.2 container** on a GitHub-hosted runner. It verifies
+actual PVE authentication, token creation/deletion and native expiry.
+
+**Security finding:** In this container, a non-root API-token issuer granted
+`PVEUserAdmin` on `/access` could create a token for `root@pam`. The test
+deletes the probe token and fails its production-readiness security gate.
+A restricted workload token did **not** self-mint a replacement (HTTP 403).
+The workflow is test-only and must not be interpreted as permission to use
+broad cross-user issuer privileges in production.
