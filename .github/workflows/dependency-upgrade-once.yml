@@ -24,7 +24,7 @@ jobs:
         run: |
           go mod edit -module github.com/msmith741/vault-plugin-secrets-proxmox
           go mod edit -go=1.26.2
-          go get github.com/hashicorp/vault/sdk@v0.26.0 github.com/hashicorp/vault/api@v1.23.0 github.com/Telmate/proxmox-api-go@06d3c5a3ac83d33bdf851ade987d4852b3b2cc75 github.com/hashicorp/go-hclog@v1.6.3 github.com/google/uuid@v1.6.0 github.com/stretchr/testify@v1.10.0
+          go get github.com/hashicorp/vault/sdk@v0.26.0 github.com/hashicorp/vault/api@v1.23.0 github.com/Telmate/proxmox-api-go@06d3c5a3ac83d33bdf851ade987d4852b3b2cc75 github.com/hashicorp/go-hclog@v1.6.3 github.com/google/uuid@v1.6.0 github.com/stretchr/testify@v1.12.1
           go mod tidy
           go mod verify
       - name: Emit dependency lock files for reviewed commit
