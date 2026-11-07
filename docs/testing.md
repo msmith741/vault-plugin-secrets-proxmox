@@ -45,7 +45,7 @@ Normal `go test ./...` and `go test -race ./...` continue to run in a separate v
 
 ## What is NOT established
 
-This test **does not** prove real Proxmox permissions, including whether the issuer token can create and delete a token for another user under narrowly scoped permissions. It also does not prove that generated tokens cannot mint replacement credentials to bypass their TTL, nor does it test any actual deployment, raw-disk passthrough, Proxmox cluster behavior or a durable/HA Vault installation.
+This **mock-based test alone** does not prove real Proxmox ACL or password-ticket behavior. Those operations have separate coverage in the [real Proxmox VE 9.2.2 container suite](real-proxmox-testing.md). Neither test establishes behavior across all Proxmox versions, a production cluster, raw-disk passthrough, durable Vault HA, or every possible account permission configuration.
 
 Additional work should include fault injection for delayed revocation, simulated Vault process restarts, issuer rotation, orphan-token handling and Proxmox version compatibility. The real permission boundary remains a **production release blocker**.
 

@@ -174,9 +174,9 @@ Remove the plugin catalog version and on-disk artifact only after verifying no o
 | `config` missing | Issuer mount never configured | `vault read proxmox-deploy/config`; do not issue test tokens yet |
 | Configuration rejected | URL isn't HTTPS `/api2/json`, token fields missing, invalid CA/timeout | Check non-secret input and certificate chain |
 | Unknown certificate authority | Proxmox internal CA is not trusted | Use correct `ca_cert_pem`; do not disable TLS verification |
-| HTTP 401 | Issuer token absent, expired or malformed | Verify issuer ID and token status with Proxmox administrator |
-| HTTP 403 | Proxmox issuer lacks permission to create/delete target token | Audit delegated ACLs; never grant blanket admin to make it work |
-| Role rejected | TTL invalid, missing `inherit_user_privileges=true`, or `root@pam` | `vault read proxmox/role/<name>` and inspect expected fields |
+| HTTP 401 | Issuer password changed, ticket login failed, or legacy issuer token expired | Verify the restricted PVE account and rotate/re-enter its password using the protected Vault config path |
+| HTTP 403 | Proxmox account lacks required token-management rights or attempted cross-user issuance | Ensure the mount issuer and role use the **same restricted user/realm**; never grant global user administration |
+| Role rejected | TTL invalid, missing `inherit_user_privileges=true`, or `root@pam` | `vault read proxmox-deploy/role/<name>` and inspect expected fields |
 | Credential read creates token but job fails | Consumer cleanup not executed | Revoke lease; inspect token and native expiration |
 | Vault lease revokes but target still works | Issuer revoke failed or unauthorized; target can mint replacement | Stop issuance, independently inspect Proxmox and investigate |
 | Rotation breaks revocation | Old issuer permissions removed | Restore authorized cleanup path, wait for native expiry where necessary |

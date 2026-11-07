@@ -12,7 +12,7 @@ This guide is for contributors and operators building or validating this Vault P
 | `path_roles.go` | Vault role CRUD, finite TTL and inherited-privilege acknowledgement |
 | `path_credentials.go` | Dynamic credential issuance, native expiry and Vault lease metadata |
 | `proxmox_api_token.go` | Proxmox create/delete API interface and Vault revoke callback |
-| `client.go` | HTTPS Proxmox connection and issuer token authentication |
+| `client.go` | HTTPS Proxmox connection and password-ticket or same-user token authentication |
 | `*_test.go` | Unit, mock HTTPS Proxmox API, and optional acceptance tests |
 | `.github/workflows/validate-go.yml` | GitHub Actions validation |
 | `.github/workflows/test-ephemeral-vault.yml` | Ephemeral real Vault server and simulated Proxmox API E2E validation |
@@ -67,7 +67,7 @@ The synthetic gate and real-Proxmox password-ticket same-user gate are automated
 Separate acceptance into two gates:
 
 1. **Vault dev instance + mock Proxmox HTTPS service**: plugin binary registration, mount creation, issuer configuration, role definition, Vault lease creation and revoke callbacks. Exercise token/role policies and plugin restarts.
-2. **Disposable real Proxmox test**: verify restricted issuer token creation/deletion for a distinct user, target-token self-mint behavior, expired token denial and independent token revocation. Stop if the target token can mint replacement tokens or the issuer needs excessive privileges.
+2. **Disposable real Proxmox test**: configure one restricted Proxmox password issuer per mount, confirm that it creates and deletes its **own user's** tokens, that a cross-user role is refused, that a restricted generated token cannot self-mint a replacement, and that native expiry and independent revocation work. The test additionally demonstrates why globally delegated cross-user token management is unsafe.
 
 The second gate is required before production integration. See [Security](security.md#pre-production-acceptance-checklist).
 
