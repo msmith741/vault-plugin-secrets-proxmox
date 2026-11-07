@@ -116,7 +116,7 @@ goreleaser check
 goreleaser release --snapshot --clean
 ```
 
-Pin release artifact digests and retain the exact immutable binary for rollback. Register with Vault only after confirming its SHA-256 matches the audited build. For plugin installation, see [Deployment](deployment.md#5-install-checksum-and-register-the-plugin). For upgrades, see [Operations](operations.md#plugin-upgrades--versioned-reversible).
+Pin release artifact digests and retain the exact immutable binary for rollback. Register with Vault only after confirming its SHA-256 matches the audited build. For plugin installation, see [Deployment](deployment.md#5-register-and-enable-the-engine). For upgrades, see [Operations](operations.md#plugin-upgrades--versioned-reversible).
 
 ## Documentation expectations
 

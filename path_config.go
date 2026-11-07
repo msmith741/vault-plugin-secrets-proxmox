@@ -122,14 +122,14 @@ func pathConfig(b *proxmoxBackend) *framework.Path {
 				},
 			},
 			"auth_method": {
-				Type: framework.TypeString,
+				Type:        framework.TypeString,
 				Description: "Issuer authentication: password (same-user self-service, recommended) or token (same-user only). Existing token mounts remain compatible.",
 			},
 			"password": {
-				Type: framework.TypeString,
+				Type:        framework.TypeString,
 				Description: "Secret password for dedicated Proxmox user, used for per-request session tickets. Required with auth_method=password.",
 				DisplayAttrs: &framework.DisplayAttributes{
-					Name: "Issuer password",
+					Name:      "Issuer password",
 					Sensitive: true,
 				},
 			},

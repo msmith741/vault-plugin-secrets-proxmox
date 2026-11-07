@@ -53,7 +53,7 @@ func newClient(config *proxmoxConfig) (*proxmoxClient, error) {
 	} else {
 		c.SetAPIToken(pxapi.ApiToken{
 			ID: pxapi.ApiTokenID{
-				User: pxapi.UserID{Name: config.User, Realm: config.Realm},
+				User:      pxapi.UserID{Name: config.User, Realm: config.Realm},
 				TokenName: pxapi.ApiTokenName(config.ApiTokenID),
 			},
 			Secret: pxapi.ApiTokenSecret(config.ApiTokenSecret),

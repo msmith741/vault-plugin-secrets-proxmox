@@ -37,7 +37,7 @@ func TestIssuerAuthenticationModesAndMutualExclusion(t *testing.T) {
 	cfg := &proxmoxConfig{
 		User: "deployer", Realm: "pve",
 		AuthMethod: "password", Password: "synthetic-password",
-		ApiURL: "https://pve.example.invalid:8006/api2/json",
+		ApiURL:      "https://pve.example.invalid:8006/api2/json",
 		TaskTimeout: 30 * time.Second,
 	}
 	if err := validateConfig(cfg); err != nil {
@@ -75,7 +75,7 @@ func TestVaultPasswordIssuerConfigDoesNotExposePassword(t *testing.T) {
 	ctx := context.Background()
 	data := map[string]interface{}{
 		"auth_method": "password", "user": "workload", "realm": "pve",
-		"password": "synthetic-not-real",
+		"password":    "synthetic-not-real",
 		"proxmox_url": "https://pve.example.invalid:8006/api2/json",
 	}
 	resp, err := b.HandleRequest(ctx, &logical.Request{
@@ -105,7 +105,7 @@ func TestCrossUserCredentialReadFailsBeforeNetwork(t *testing.T) {
 	cfg := &proxmoxConfig{
 		User: "issuer", Realm: "pve", ApiTokenID: "bootstrap",
 		ApiTokenSecret: "synthetic-only", AuthMethod: "token",
-		ApiURL: "https://nonexistent.example.invalid:8006/api2/json",
+		ApiURL:      "https://nonexistent.example.invalid:8006/api2/json",
 		TaskTimeout: 5 * time.Second,
 	}
 	entry, err := logical.StorageEntryJSON(configStoragePath, cfg)
