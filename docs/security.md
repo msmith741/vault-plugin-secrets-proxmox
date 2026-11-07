@@ -35,7 +35,9 @@ No production workload receives the issuer password. The token secret returned b
 - **Legacy API-token authentication:** Still accepted for **same-user** operations. Historical cross-user mounts can revoke outstanding leases but cannot create more of them.
 - **Credential-mode isolation:** Password and API-token issuer credentials cannot be combined in one mount.
 - **Finite lifetime:** Role TTL is validated, Proxmox native expiry is set, and Vault leases are nonrenewable.
-- **Verified HTTPS:** TLS verification is on by default; `ca_cert_pem` supports internal CAs. Never enable the legacy bypass for production.
+- **Verified HTTPS:** All new issuance requires verified TLS; `ca_cert_pem` supports internal CAs. New configuration forbids TLS bypass, custom HTTP headers and proxies, and the Proxmox client refuses redirects.
+- **Secret-safe diagnostics:** Upstream login/create/revoke errors are sanitized; legacy custom-header/proxy values are redacted in config reads.
+- **Identity encoding:** Issuer and role identities reject path, URL and account delimiters before Proxmox API requests.
 - **Role acknowledgement:** `inherit_user_privileges=true` is required; generated token has `privsep=false` and inherits **the restricted user's permissions**.
 - **Immutable revoke target:** Each new lease stores the Proxmox target user/realm and token ID, so later role edits do not redirect revocation.
 
@@ -99,6 +101,8 @@ Previously configured cross-user mounts **stop issuing new tokens** under the ha
 - [Deployment](deployment.md)
 - [Configuration](configuration.md)
 - [Operations](operations.md)
+- [Hermes Host Operations integration](hermes-host-operations.md)
+- [Final security audit and readiness gates](audits/2026-11-07-security-review.md)
 - [Real Proxmox authorization tests](real-proxmox-testing.md)
 - [Proxmox user management](https://pve.proxmox.com/pve-docs/pveum.html)
 - [Vault security policies](https://developer.hashicorp.com/vault/docs/concepts/policies)

@@ -33,10 +33,12 @@ The Vault mount's issuer identity is **not** exposed to consumers as a credentia
 | `token_secret` | Secret string | Required for `token` | Issuer API-token secret |
 | `proxmox_url` | HTTPS URL | Required | Must end in `/api2/json`; no embedded userinfo/query/fragment |
 | `ca_cert_pem` | String | Optional | PEM certificate authorities for Proxmox HTTPS endpoint |
-| `insecure_skip_tls_verify` | Boolean | `false` | Legacy TLS bypass; **do not enable** in production |
+| `insecure_skip_tls_verify` | Boolean | `false` | **Rejected for new configuration and credential issuance**. Historical values should be migrated to CA trust before upgrade |
 | `timeout` | Seconds | 120 | API operation timeout, 1–300 seconds |
-| `proxy_server` | String | Empty | Underlying API-client proxy configuration; avoid uncontrolled proxies |
-| `http_headers` | String | Empty | Additional headers; restrict to trusted operator configuration |
+| `proxy_server` | String | Empty | Legacy-only. **Nonempty values rejected for new configuration/issuance** and redacted on config read |
+| `http_headers` | String | Empty | Legacy-only. **Nonempty values rejected for new configuration/issuance** and redacted on config read |
+
+**Security transport enforcement:** New issuer configurations and all new credential reads reject disabled TLS verification, nonempty custom header overrides and custom proxy values. Existing historical settings may be retained temporarily solely for retiring outstanding leases; update them to verified TLS before continuing issuance. The plugin also refuses HTTP redirects, so issuer credentials cannot be forwarded to a redirected endpoint.
 
 **Credential modes are mutually exclusive.** Configuring a password together with API-token authentication fields is rejected. When changing `auth_method`, the plugin clears the previous mode's credential fields. Existing stored configurations without an `auth_method` field are interpreted as legacy `token` mode for compatibility.
 

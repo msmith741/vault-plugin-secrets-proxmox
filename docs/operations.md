@@ -186,4 +186,6 @@ Remove the plugin catalog version and on-disk artifact only after verifying no o
 
 Record issuance count by **Vault mount and role**, failed issuance, failed revocation, lease age, API error class and the count of unmatched/expired Proxmox tokens. Avoid storing raw secrets in metric labels, traces, dashboards or error log bodies. Monitor issuer-account ACL changes, plugin registration/reload, and Vault authentication policy changes as high-signal security events.
 
+For a scoped MCP consumer that requests temporary Proxmox credentials using Kubernetes ServiceAccount authentication, see [Hermes Host Operations](hermes-host-operations.md). For documented acceptance requirements, see the [security audit](audits/2026-11-07-security-review.md).
+
 For Vault audit setup, follow [Vault audit devices](https://developer.hashicorp.com/vault/docs/audit). For plugin lifecycle, follow [Vault plugin upgrade](https://developer.hashicorp.com/vault/docs/plugins/upgrade).

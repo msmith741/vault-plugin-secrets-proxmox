@@ -161,7 +161,7 @@ unset IMAGE_PASSWORD
 vault read proxmox-images/config
 ```
 
-For an internally issued TLS certificate, add `ca_cert_pem=@/secure/path/to/pve-ca-chain.pem` to **each** configuration command. The file must be accessible to the **Vault CLI machine** and contain trusted PEM certificates only. Prefer a verified certificate chain and matching hostname; do not bypass TLS verification.
+For an internally issued TLS certificate, add `ca_cert_pem=@/secure/path/to/pve-ca-chain.pem` to **each** configuration command. **New credential issuance and config writes reject** disabled TLS verification, custom header overrides, and custom proxy settings. The plugin also refuses HTTP redirects. The file must be accessible to the **Vault CLI machine** and contain trusted PEM certificates only. Prefer a verified certificate chain and matching hostname; do not bypass TLS verification.
 
 ### Legacy token authentication
 
@@ -282,6 +282,8 @@ Safe migration procedure:
 
 ## Further information
 
+- [Hermes Host Operations integration](hermes-host-operations.md)
+- [Final security audit and acceptance gates](audits/2026-11-07-security-review.md)
 - [Configuration/API reference](configuration.md)
 - [Security model and acceptance checklist](security.md)
 - [Operations, upgrades and recovery](operations.md)
