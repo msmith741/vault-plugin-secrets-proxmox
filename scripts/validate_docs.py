@@ -17,7 +17,7 @@ LINK = re.compile(r"!?\[[^\]\n]*\]\(([^)\n]+)\)")
 HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*#*\s*$", re.MULTILINE)
 # Reject hard-coded private network addresses and non-example local domains
 # in reusable documentation. RFC 5737 / .invalid addresses remain suitable.
-PRIVATE_IPV4 = re.compile(r"\b(?:10|192\.168)\.(?:\d{1,3}\.){2}\d{1,3}\b")
+PRIVATE_IPV4 = re.compile(r"\b(?:10\.(?:\d{1,3}\.){2}\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})\b")
 LOCAL_DOMAIN = re.compile(r"\b[a-z0-9-]+\.home\.[a-z0-9.-]+\b", re.I)
 
 
