@@ -39,9 +39,9 @@ func TestRoleDefaultsAndRejectsZeroTTL(t *testing.T) {
 	ctx := context.Background()
 	req := &logical.Request{
 		Operation: logical.CreateOperation,
-		Path: "role/new-role",
-		Storage: storage,
-		Data: map[string]interface{}{"user": "vm", "realm": "pve"},
+		Path:      "role/new-role",
+		Storage:   storage,
+		Data:      map[string]interface{}{"user": "vm", "realm": "pve"},
 	}
 	response, err := b.HandleRequest(ctx, req)
 	if err != nil || response != nil {
@@ -89,9 +89,9 @@ func TestRevocationIdentitySurvivesRoleChanges(t *testing.T) {
 	ctx := context.Background()
 	data := map[string]interface{}{
 		"token_id": "vault-123",
-		"user": "tofu-vm",
-		"realm": "pve",
-		"role": "vm-deployer",
+		"user":     "tofu-vm",
+		"realm":    "pve",
+		"role":     "vm-deployer",
 	}
 	// The role was removed after issuance; new leases still revoke correctly.
 	user, realm, token, err := b.revocationIdentity(ctx, storage, data)
