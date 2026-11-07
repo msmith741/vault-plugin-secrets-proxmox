@@ -5,7 +5,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"net/url"
+	neturl "net/url"
 	"strings"
 	"time"
 
@@ -41,7 +41,7 @@ func validateConfig(c *proxmoxConfig) error {
 	if strings.TrimSpace(c.ApiTokenID) == "" || strings.TrimSpace(c.ApiTokenSecret) == "" {
 		return fmt.Errorf("issuer token_id and token_secret must be set")
 	}
-	endpoint, err := url.Parse(c.ApiURL)
+	endpoint, err := neturl.Parse(c.ApiURL)
 	if err != nil || endpoint.Scheme != "https" || endpoint.Host == "" ||
 		endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" ||
 		endpoint.Path != "/api2/json" || endpoint.Opaque != "" {
