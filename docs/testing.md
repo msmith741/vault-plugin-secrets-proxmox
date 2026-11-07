@@ -20,7 +20,7 @@ The runner has no need for repository secrets, a VPN, your Vault address, a Prox
 4. It starts a real **Vault 1.21.4** process in disposable development mode on `127.0.0.1:8200`. Vault's plugin directory contains the newly compiled binary.
 5. The harness registers the plugin with its SHA-256, mounts the secrets engine, configures an issuer with the local CA, creates Vault roles and an isolated consumer ACL.
 6. It reads a generated Proxmox token through a restricted Vault identity and checks the returned lease, role mapping, native expiration and mock authentication.
-7. It changes the underlying Vault role and revokes the original lease, verifying the original Proxmox token has been deleted. It also tests a simulated Proxmox **403**, refusal of `root@pam` issuance and rejection of an untrusted HTTPS certificate.
+7. It changes the underlying Vault role and revokes the original lease, verifying the original Proxmox token has been deleted. A second token is allowed to expire naturally after a one-minute Vault TTL, confirming Vault's expiration manager also deletes it automatically and that lease renewal is refused. It also tests a simulated Proxmox **403**, refusal of `root@pam` issuance and rejection of an untrusted HTTPS certificate.
 8. The workflow attempts to stop both local processes even on failure, and the disposable runner is destroyed.
 
 ## Checks performed
@@ -36,6 +36,7 @@ The runner has no need for repository secrets, a VPN, your Vault address, a Prox
 | Token creation API / native expiration / privilege mode | Synthetic Proxmox HTTPS API |
 | Token identity remains stable across role update | Real Vault + synthetic Proxmox |
 | Explicit synchronous lease revoke calls Proxmox delete | Real Vault + synthetic Proxmox |
+| Natural Vault lease expiry calls Proxmox delete; lease renewal denied | Real Vault + synthetic Proxmox |
 | Revoked API token cannot authenticate | Synthetic Proxmox HTTPS API |
 | Upstream API denies token creation with HTTP 403 | Synthetic Proxmox HTTPS API |
 | Custom CA trusted; unknown CA rejected | Real Vault plugin TLS client + synthetic HTTPS server |
