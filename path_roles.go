@@ -60,7 +60,7 @@ func (r *proxmoxRoleEntry) toResponseData() map[string]interface{} {
 func pathRole(b *proxmoxBackend) []*framework.Path {
 	return []*framework.Path{
 		{
-			Pattern: "role/" + framework.GenericNameRegex("name"),
+			Pattern:        "role/" + framework.GenericNameRegex("name"),
 			ExistenceCheck: b.pathRoleExistenceCheck,
 			Fields: map[string]*framework.FieldSchema{
 				"name": {
