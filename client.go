@@ -2,6 +2,8 @@ package proxmox
 
 import (
 	"crypto/tls"
+	"crypto/x509"
+	"fmt"
 	"errors"
 
 	pxapi "github.com/Telmate/proxmox-api-go/proxmox"
@@ -16,16 +18,23 @@ func newClient(config *proxmoxConfig) (*proxmoxClient, error) {
 		return nil, errors.New("client configuration was nil")
 	}
 
-	if config.ApiTokenID == "" {
-		return nil, errors.New("client api token was not defined")
+	if err := validateConfig(config); err != nil {
+		return nil, fmt.Errorf("invalid Proxmox issuer configuration: %w", err)
 	}
 
-	tlsConfig := &tls.Config{
-		InsecureSkipVerify: true,
+	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
+	if config.CACertPEM != "" {
+		roots, err := x509.SystemCertPool()
+		if err != nil {
+			roots = x509.NewCertPool()
+		}
+		if !roots.AppendCertsFromPEM([]byte(config.CACertPEM)) {
+			return nil, errors.New("Proxmox CA certificate is not valid PEM")
+		}
+		tlsConfig.RootCAs = roots
 	}
-	if !config.SkipCertValidation {
-		tlsConfig = nil
-	}
+	// Explicit legacy compatibility flag. Prefer ca_cert_pem.
+	tlsConfig.InsecureSkipVerify = config.SkipCertValidation // #nosec G402 -- opt-in, administrator-only
 
 	c, err := pxapi.NewClient(config.ApiURL, nil, config.HTTPHeaders, tlsConfig, config.ProxyServer, int(config.TaskTimeout.Seconds()), nil)
 	if err != nil {
