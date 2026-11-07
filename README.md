@@ -1,139 +1,98 @@
-# Vault Plugin: Proxmox
+# Vault Proxmox Secrets Engine
 
-This is a standalone backend plugin for use with [Hashicorp Vault](https://www.github.com/hashicorp/vault).
-This plugin provides handling of Proxmox VE API tokens by Vault.
+A community **HashiCorp Vault external secrets-engine plugin** that creates temporary **Proxmox Virtual Environment API tokens**. Vault issues a lease for each generated credential and calls Proxmox to delete the token when that lease is revoked or expires.
 
-This plugin is a bit "first pass" and can not yet create tokens with privileges separate from the user account it belongs to (pull requests welcome :sparkles:).
+> [!WARNING]
+> **Pre-production software.** Automated tests and mock Proxmox API tests are available, but successful integration with every Vault and Proxmox version, issuer privilege delegation, and protection against generated tokens creating replacement tokens have **not** been established. Complete the [security acceptance checklist](docs/security.md#pre-production-acceptance-checklist) before deploying with privileged or production infrastructure access.
 
-## Getting Started
+## Features and constraints
 
-This is a [Vault plugin](https://www.vaultproject.io/docs/internals/plugins.html)
-and is meant to work with Vault. This guide assumes you have already installed Vault
-and have a basic understanding of how Vault works.
+| Feature | Behavior |
+|---|---|
+| Dynamic credentials | One fresh Proxmox token per read of `<mount>/creds/<role>` |
+| Lifetime | Role default 30 minutes; minimum 1 minute, permitted role maximum no more than 24 hours |
+| Proxmox expiry | Native expiration timestamp, independent of Vault availability |
+| Vault leases | Non-renewable; explicit and automatic revocation supported |
+| Role mapping | Vault role selects the target Proxmox username and realm |
+| TLS | HTTPS required; normal certificate validation or optional PEM CA |
+| Multiple credentials | One issuer credential per mount; use separate mounts for isolated issuers |
+| **Privilege separation** | Generated tokens use `privsep=false` and inherit the **entire** target user's permissions |
+| Compatibility | Go 1.26.2+ module; CI uses Go 1.27.3; validate deployed Vault/Proxmox versions independently |
 
-Otherwise, first read this guide on how to [get started with Vault](https://www.vaultproject.io/intro/getting-started/install.html).
+The `inherit_user_privileges=true` role setting is an **explicit acknowledgement** of inherited permissions, **not** a mechanism that restricts them. Roles targeting `root@pam` are rejected. A temporary token may still be able to create another token if its Proxmox permissions allow it.
 
-To learn specifically about how plugins work, see documentation on [Vault plugins](https://www.vaultproject.io/docs/internals/plugins.html).
+## Documentation
 
-## Installation
+| Document | Contents |
+|---|---|
+| **[Deployment guide](docs/deployment.md)** | Prerequisites; Proxmox identities; compilation; Vault server configuration; plugin registration; live mount/role configuration; credentials; verification |
+| **[Configuration and API reference](docs/configuration.md)** | Every Vault API path, field, response, TTL rule, examples, and Vault ACL policy patterns |
+| **[Security and acceptance](docs/security.md)** | Permission model, threat analysis, release gates, token lifetime implications, safe authentication |
+| **[Operations](docs/operations.md)** | Health checks, issuance/revocation, issuer rotation, upgrades, rollback, HA, backup, alerting, troubleshooting |
+| **[Development](docs/development.md)** | Local build, test commands, synthetic API tests, dependency management, releases and contribution guidelines |
+| **[Consumer policy example](docs/examples/consumer-policy.hcl)** | Read-only access to one Vault credential role |
+| **[Operator policy example](docs/examples/operator-policy.hcl)** | Mount-specific management policy; requires review before granting |
 
-Currently no built release is distributed, you'll have to build from source for your chosen OS and architecture.
+## Quick orientation
 
-1. Clone this repository and change directory into the root.
-2. For good measure, run some tests: `go test -v`.
-3. Change directory into `cmd/vault-plugin-secrets-proxmox`
-4. Build the plugin `go build` and then get the SHA256 hash of the binary.
-5. Install the plugin and register it with the hash, see the [Vault plugin docs](https://developer.hashicorp.com/vault/docs/plugins/plugin-architecture#plugin-registration) for more information.
+The plugin is not a standalone HTTP service. Vault starts it as a child process after an administrator installs and registers its binary.
 
-## Setup (Proxmox)
-
-1. Access your Proxmox VE cluster and under **Permissions** / **API Tokens** create a new API token that you will setup the Vault secrets engine with.
-2. If you want the role(s), and subsequent minted API tokens, to impersonate a user other than you (probably a good idea) create those accounts under **Permissions** / **Users** (eg `ci` or `packer` or I don't know..). The minted tokens will inherit **all** permissions of the user their role is created for, until we've added support for separate per-token privileges.
-
-## Setup (Vault)
-
-1. With the plugin installed from the steps above, mount it at some endpoint of your choosing
-```sh
-vault secrets enable -path=proxmox vault-plugin-secrets-proxmox
+```text
+CI / workload --Vault authentication--> Vault secrets engine
+                                          |
+                                  /creds/workload
+                                          |
+                                     Proxmox API
+                                       create
+                                          |
+                           temporary token + Vault lease
+                                          |
+                                workload uses token
+                                          |
+                       lease expiry/revoke -> Proxmox delete
 ```
 
-2. Configure the plugin
-```sh
-vault write proxmox/config user=<User that configured API token is for, e.g. root> realm=<Realm of the user that configured API token is for, e.g. pam> token_id=<API Token ID e.g. mytesttoken (excluding '<user>@<realm>!' which are set separately)> token_secret=<The secret uuid corresponding to a TokenID> proxmox_url=<API Endpoint URL, e.g. https://host.fqdn:8006/api2/json>
-```
-Optional config fields include `insecure_skip_tls_verify`, `http_headers`, `proxy_server` and `timeout`.
+The Proxmox issuer API token is stored in the **secrets engine's config**, not in the calling workload's credentials. Workloads should have read access only to their own `creds/` endpoint. Do not grant them permission to manage `config` or `role/`.
 
-3. Create a role for the Proxmox user you are going to create tokens for
-```sh
-vault write proxmox/role/alice user="alice" realm="pve" ttl=30m max_ttl=1h inherit_user_privileges=true
-```
+### Minimal CLI example (after deployment)
 
-4. To test that it works, retrieve a new Proxmox API token from Vault
-```sh
-vault read proxmox/creds/alice
-```
+An administrator defines a role for an existing, restricted Proxmox account:
 
-5. You should now have gotten an API token for Proxmox, now lets revoke it (using the output `lease_id`)
-```sh
-vault lease revoke proxmox/creds/alice/<lease id>
+```shell
+vault write proxmox/role/workload \
+  user="workload" \
+  realm="pve" \
+  ttl="30m" \
+  max_ttl="1h" \
+  inherit_user_privileges=true
 ```
 
-## Contribute
+An authorized consumer requests credentials:
 
-Pull requests welcome, and be nice.
-
-
-## Security and lease lifecycle (hardening branch)
-
-New roles default to a **30-minute TTL** and a **1-hour maximum TTL**.
-A role must have a finite TTL of at least one minute, and its maximum
-must not exceed 24 hours. Existing legacy roles with TTL 0 are rejected
-during issuance until updated. Token creation cannot fall back to
-Proxmox's never-expiring `expire=0` behavior.
-
-Issued tokens are **non-renewable**. Vault lease renewal is intentionally
-unsupported because the upstream implementation did not extend the
-independent Proxmox expiration. The native expiration is rounded up to
-the next second so it cannot precede the Vault lease deadline.
-
-The lease records the immutable issuing Proxmox user and realm. New
-leases can be revoked even after their Vault role changes or is deleted.
-For legacy leases, revocation still consults the original role and thus
-requires it to exist; revoke outstanding legacy leases before changing
-or deleting such roles.
-
-### Separate image and VM identities
-
-Use two instances of the secrets engine, each with a separate issuer
-credential, if the issuer API scopes must be isolated. Within each mount,
-define a role with a dedicated **least-privileged Proxmox user**:
-
-```sh
-vault write proxmox-images/role/image-builder user=tofu-images realm=pve ttl=30m max_ttl=1h inherit_user_privileges=true
-vault write proxmox-vms/role/vm-deployer user=tofu-vm realm=pve ttl=30m max_ttl=1h inherit_user_privileges=true
+```shell
+vault read proxmox/creds/workload
 ```
 
-Each generated token currently uses `privsep=false` and inherits its
-parent user's permissions. Do **not** assign broad privileges (including
-privileges that allow the short-lived token to mint replacements) to
-those users. Prove issuer capabilities, token self-mint behavior and
-revocation on disposable Proxmox accounts before enabling production.
+**The response contains a secret.** Do not use a terminal recording, shared CI log, or unprotected file. The response includes `lease_id`, `lease_duration`, `lease_renewable=false`, `data.token_id_full` and `data.secret`. For the raw Proxmox API format, concatenate `token_id_full + "=" + secret`.
 
-### Not yet production certified
+To revoke, use the **exact returned** lease ID, not the role path:
 
-This first PR does not upgrade the 2023 dependencies, prove live PVE
-compatibility, implement per-token privilege separation, or change the
-issuer model. CI is an initial gate. Review, update and retest dependencies
-and prove token expiry and revocation against a disposable Proxmox
-identity before installing the plugin on `vault01`.
-
-## Dependency modernization
-
-The fork now targets Go 1.27.3 for CI and release builds, Vault SDK
-v0.26.0, Vault API v1.23.0, and the Proxmox API client pinned to
-`06d3c5a3ac83` (October 31, 2026). The Go module path was changed
-to this fork's canonical import path.
-
-The Proxmox API client now uses the typed `Client.New().ApiToken`
-interface for creating and deleting tokens. This is a source/API
-migration; a successful compile is not a substitute for a controlled
-live issuer-permission test on a disposable Proxmox identity.
-
-To validate locally:
-
-```sh
-go mod verify
-go test ./...
-go vet ./...
-go build ./cmd/vault-plugin-secrets-proxmox
+```shell
+vault lease revoke "<LEASE_ID_FROM_RESPONSE>"
 ```
 
-## Pre-integration hardening
+Read [the deployment guide](docs/deployment.md) for the required infrastructure configuration, authenticated secret entry, Vault policies, and validation steps.
 
-**Do not deploy directly to production Vault yet.** See [Pre-integration security review](docs/pre-integration-security-review.md).
+## Current release status
 
-The plugin still creates Proxmox tokens with `privsep=false`. Each role **must** set `inherit_user_privileges=true` to explicitly acknowledge that all privileges of its Proxmox user are inherited; the plugin refuses `root@pam` role issuance. This acknowledgement does not protect against token self-minting. Assign narrowly scoped Proxmox users and test whether temporary tokens can create replacement API tokens.
+- GitHub Actions verifies the module graph, unit tests, race detector, compilation, `go vet`, formatting, and release configuration.
+- The code has synthetic TLS Proxmox API and lease-callback tests.
+- It has **not** been approved for unattended use with privileged Proxmox accounts; the permission-boundary acceptance tests remain outstanding.
+- Token renewal and per-token Proxmox ACL assignment are not implemented.
+- The plugin's Vault `role.max_ttl` field validates configuration; because leases are non-renewable, it does not enable renewals or extend `role.ttl`.
 
-For servers with a private CA, configure `ca_cert_pem` with the actual PEM certificate chain, not `insecure_skip_tls_verify=true`. The Proxmox API endpoint must use HTTPS and end in `/api2/json`. Issuer credentials remain private in plugin storage and must not be pasted into source control, CI logs or shell history.
+## License and provenance
 
-Changing the issuer credentials during an active lease can break later revocations. Keep the old issuer's authority until old leases have expired or been revoked and verified in Proxmox. Preserve break-glass administrator access outside Vault.
+See [LICENSE](LICENSE). This project is maintained as a community fork of [mollstam/vault-plugin-secrets-proxmox](https://github.com/mollstam/vault-plugin-secrets-proxmox).
+
+For official Vault plugin mechanics, consult the [Vault external-plugin documentation](https://developer.hashicorp.com/vault/docs/plugins/register). For Proxmox token semantics, consult [Proxmox user management documentation](https://pve.proxmox.com/pve-docs/pveum.html).
