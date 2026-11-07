@@ -3,7 +3,6 @@ package proxmox
 import (
 	"crypto/tls"
 	"errors"
-	"fmt"
 
 	pxapi "github.com/Telmate/proxmox-api-go/proxmox"
 )
@@ -21,8 +20,6 @@ func newClient(config *proxmoxConfig) (*proxmoxClient, error) {
 		return nil, errors.New("client api token was not defined")
 	}
 
-	fullToken := fmt.Sprintf("%s@%s!%s", config.User, config.Realm, config.ApiTokenID)
-
 	tlsConfig := &tls.Config{
 		InsecureSkipVerify: true,
 	}
@@ -30,12 +27,18 @@ func newClient(config *proxmoxConfig) (*proxmoxClient, error) {
 		tlsConfig = nil
 	}
 
-	c, err := pxapi.NewClient(config.ApiURL, nil, config.HTTPHeaders, tlsConfig, config.ProxyServer, int(config.TaskTimeout.Seconds()))
+	c, err := pxapi.NewClient(config.ApiURL, nil, config.HTTPHeaders, tlsConfig, config.ProxyServer, int(config.TaskTimeout.Seconds()), nil)
 	if err != nil {
 		return nil, err
 	}
 
-	c.SetAPIToken(fullToken, config.ApiTokenSecret)
+	c.SetAPIToken(pxapi.ApiToken{
+		ID: pxapi.ApiTokenID{
+			User:      pxapi.UserID{Name: config.User, Realm: config.Realm},
+			TokenName: pxapi.ApiTokenName(config.ApiTokenID),
+		},
+		Secret: pxapi.ApiTokenSecret(config.ApiTokenSecret),
+	})
 
 	return &proxmoxClient{c}, nil
 }

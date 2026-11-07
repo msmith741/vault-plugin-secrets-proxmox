@@ -244,11 +244,12 @@ func (e *testEnv) CleanupApiTokens(t *testing.T) {
 			t.Fatal("fatal getting client")
 		}
 
-		u, err := pxapi.NewConfigUserFromApi(pxapi.UserID{Name: e.RoleUser, Realm: e.RoleRealm}, c.Client)
+		_, err = c.New().ApiToken.Delete(e.Context, pxapi.ApiTokenID{
+			User:      pxapi.UserID{Name: e.RoleUser, Realm: e.RoleRealm},
+			TokenName: pxapi.ApiTokenName(token),
+		})
 		if err != nil {
-			t.Fatalf("unexpected error creating ConfigUser to delete token: %s", err)
+			t.Fatal(err)
 		}
-
-		u.DeleteApiToken(c.Client, pxapi.ApiToken{TokenId: token})
 	}
 }

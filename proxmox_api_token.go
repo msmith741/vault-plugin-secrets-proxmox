@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	pxapi "github.com/Telmate/proxmox-api-go/proxmox"
 	"github.com/google/uuid"
@@ -103,32 +104,31 @@ func createToken(ctx context.Context, c *proxmoxClient, user string, realm strin
 	// Proxmox API wants token IDs to start with a latter (regexp (?^:[A-Za-z][A-Za-z0-9\.\-_]+)) so lets remap the entire thing
 	tokenId := strings.NewReplacer("0", "g", "1", "h", "2", "i", "3", "j", "4", "k", "5", "l", "6", "m", "7", "n", "8", "o", "9", "p").Replace(rawTokenId)
 
-	u, err := pxapi.NewConfigUserFromApi(pxapi.UserID{Name: user, Realm: realm}, c.Client)
-	if err != nil {
-		return nil, fmt.Errorf("error when setting up API user: %w", err)
+	if expire <= time.Now().Unix() {
+		return nil, errors.New("refusing to create a Proxmox token without a future native expiration")
 	}
-
-	secret, err := u.CreateApiToken(c.Client, pxapi.ApiToken{TokenId: tokenId, Comment: "Managed by Vault", Expire: expire, Privsep: privsep})
+	comment := "Managed by Vault"
+	expiration := uint(expire)
+	secret, err := c.New().ApiToken.Create(ctx, pxapi.UserID{Name: user, Realm: realm}, pxapi.ApiTokenConfig{
+		Name:                pxapi.ApiTokenName(tokenId),
+		Comment:             &comment,
+		Expiration:          &expiration,
+		PrivilegeSeparation: &privsep,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("error from API when creating token: %w", err)
 	}
 
 	return &proxmoxToken{
 		TokenID: tokenId,
-		Secret:  secret,
+		Secret:  secret.String(),
 	}, nil
 }
 
 func deleteToken(ctx context.Context, c *proxmoxClient, user string, realm string, tokenID string) error {
-	u, err := pxapi.NewConfigUserFromApi(pxapi.UserID{Name: user, Realm: realm}, c.Client)
-	if err != nil {
-		return err
-	}
-
-	err = u.DeleteApiToken(c.Client, pxapi.ApiToken{TokenId: tokenID})
-	if err != nil {
-		return err
-	}
-
-	return nil
+	_, err := c.New().ApiToken.Delete(ctx, pxapi.ApiTokenID{
+		User:      pxapi.UserID{Name: user, Realm: realm},
+		TokenName: pxapi.ApiTokenName(tokenID),
+	})
+	return err
 }

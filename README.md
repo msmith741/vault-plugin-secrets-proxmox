@@ -106,3 +106,24 @@ compatibility, implement per-token privilege separation, or change the
 issuer model. CI is an initial gate. Review, update and retest dependencies
 and prove token expiry and revocation against a disposable Proxmox
 identity before installing the plugin on `vault01`.
+
+## Dependency modernization
+
+The fork now targets Go 1.27.3 for CI and release builds, Vault SDK
+v0.26.0, Vault API v1.23.0, and the Proxmox API client pinned to
+`06d3c5a3ac83` (October 31, 2026). The Go module path was changed
+to this fork's canonical import path.
+
+The Proxmox API client now uses the typed `Client.New().ApiToken`
+interface for creating and deleting tokens. This is a source/API
+migration; a successful compile is not a substitute for a controlled
+live issuer-permission test on a disposable Proxmox identity.
+
+To validate locally:
+
+```sh
+go mod verify
+go test ./...
+go vet ./...
+go build ./cmd/vault-plugin-secrets-proxmox
+```
