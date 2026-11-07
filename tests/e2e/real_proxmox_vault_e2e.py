@@ -67,6 +67,10 @@ class PVE:
         self.url = url.rstrip("/")
         self.root_auth = root_auth
         self.context = ssl.create_default_context(cafile=str(ca))
+        # The test-only PVE image may not export its generated cluster CA.
+        # Treat the observed leaf as a local trust anchor (still enforce
+        # signature verification and hostname matching for this CI host).
+        self.context.verify_flags |= ssl.VERIFY_X509_PARTIAL_CHAIN
 
     def call(self, method, path, auth=None, fields=None):
         body = None
