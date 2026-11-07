@@ -2,8 +2,8 @@ package proxmox
 
 import (
 	"context"
-	"encoding/pem"
 	"crypto/tls"
+	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,20 +16,20 @@ import (
 
 func auditIssuer() *proxmoxConfig {
 	return &proxmoxConfig{
-		User: "hermes-observer",
-		Realm: "pve",
-		AuthMethod: "token",
-		ApiTokenID: "bootstrap",
+		User:           "hermes-observer",
+		Realm:          "pve",
+		AuthMethod:     "token",
+		ApiTokenID:     "bootstrap",
 		ApiTokenSecret: "synthetic-only",
-		ApiURL: "https://pve.example.invalid:8006/api2/json",
-		TaskTimeout: 10 * time.Second,
+		ApiURL:         "https://pve.example.invalid:8006/api2/json",
+		TaskTimeout:    10 * time.Second,
 	}
 }
 
 func TestSecurityAuditRejectsUnsafeIssuerOverrides(t *testing.T) {
 	for _, test := range []struct {
 		name string
-		set func(*proxmoxConfig)
+		set  func(*proxmoxConfig)
 	}{
 		{"disable TLS verification", func(c *proxmoxConfig) { c.SkipCertValidation = true }},
 		{"custom Authorization header", func(c *proxmoxConfig) { c.HTTPHeaders = "Authorization,synthetic-sensitive-header" }},
@@ -47,11 +47,11 @@ func TestSecurityAuditRejectsUnsafeIssuerOverrides(t *testing.T) {
 				"token_id": cfg.ApiTokenID, "token_secret": cfg.ApiTokenSecret,
 				"proxmox_url": cfg.ApiURL, "timeout": 10,
 				"insecure_skip_tls_verify": cfg.SkipCertValidation,
-				"http_headers": cfg.HTTPHeaders, "proxy_server": cfg.ProxyServer,
+				"http_headers":             cfg.HTTPHeaders, "proxy_server": cfg.ProxyServer,
 			}
 			res, err := b.HandleRequest(context.Background(), &logical.Request{
 				Operation: logical.CreateOperation,
-				Path: "config", Data: fields, Storage: storage,
+				Path:      "config", Data: fields, Storage: storage,
 			})
 			if err == nil && (res == nil || !res.IsError()) {
 				t.Fatal("unsafe Vault config write accepted")
@@ -96,7 +96,7 @@ func TestSecurityAuditRedactsHistoricalHeadersAndProxy(t *testing.T) {
 func TestSecurityAuditIssuerIdentityEncoding(t *testing.T) {
 	for _, test := range []struct {
 		user, realm string
-		allowed bool
+		allowed     bool
 	}{
 		{"hermes-observer", "pve", true},
 		{"reader.workload_1", "ldap-dev", true},

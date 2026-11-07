@@ -56,9 +56,9 @@ func newClientWithContext(ctx context.Context, config *proxmoxConfig) (*proxmoxC
 	httpClient := &http.Client{
 		Timeout: config.TaskTimeout,
 		Transport: &http.Transport{
-			TLSClientConfig: tlsConfig,
+			TLSClientConfig:    tlsConfig,
 			DisableCompression: true,
-			Proxy: proxy,
+			Proxy:              proxy,
 		},
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse

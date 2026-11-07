@@ -293,9 +293,9 @@ func (b *proxmoxBackend) pathConfigRead(ctx context.Context, req *logical.Reques
 			"insecure_skip_tls_verify": c.SkipCertValidation,
 			// Legacy overrides can contain embedded access credentials.
 			// Never echo them in an operator-readable configuration response.
-			"http_headers":             redactedLegacySetting(c.HTTPHeaders),
-			"proxy_server":             redactedLegacySetting(c.ProxyServer),
-			"timeout":                  int(c.TaskTimeout.Seconds()),
+			"http_headers": redactedLegacySetting(c.HTTPHeaders),
+			"proxy_server": redactedLegacySetting(c.ProxyServer),
+			"timeout":      int(c.TaskTimeout.Seconds()),
 		},
 	}, nil
 }
