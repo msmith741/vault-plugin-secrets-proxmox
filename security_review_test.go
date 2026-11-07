@@ -186,9 +186,38 @@ func TestProxmoxTokenLifecycleAgainstMockTLSAPI(t *testing.T) {
 	if err := deleteToken(context.Background(), c, "tofu-vm", "pve", token.TokenID); err != nil {
 		t.Fatalf("delete against mock: %v", err)
 	}
+
+	// Exercise the Vault dynamic-secret creation and revoke callbacks,
+	// not just the raw Proxmox client methods. No role is persisted;
+	// revocation must use the identity captured inside the lease.
+	b, storage := getTestBackend(t)
+	entry, err := logical.StorageEntryJSON(configStoragePath, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := storage.Put(context.Background(), entry); err != nil {
+		t.Fatal(err)
+	}
+	role := &proxmoxRoleEntry{
+		Name: "vm-deployer", User: "tofu-vm", Realm: "pve",
+		TTL: time.Minute, MaxTTL: time.Hour, InheritUserPrivileges: true,
+	}
+	response, err := b.createUserCreds(context.Background(), &logical.Request{Storage: storage}, role)
+	if err != nil || response == nil || response.Secret == nil {
+		t.Fatalf("Vault lease issuance failed: response=%v error=%v", response, err)
+	}
+	if response.Secret.Renewable || response.Secret.TTL != time.Minute {
+		t.Fatalf("Vault lease has unsafe renewal or TTL: %#v", response.Secret)
+	}
+	if _, err := b.tokenRevoke(context.Background(), &logical.Request{
+		Storage: storage, Secret: response.Secret,
+	}, nil); err != nil {
+		t.Fatalf("Vault revoke callback failed: %v", err)
+	}
+
 	mu.Lock()
 	defer mu.Unlock()
-	if createCalls != 1 || deleteCalls != 1 || token.TokenID != issuedID {
+	if createCalls != 2 || deleteCalls != 2 || response.Data["token_id"] != issuedID {
 		t.Fatalf("unexpected create/delete calls: created=%d deleted=%d", createCalls, deleteCalls)
 	}
 }
