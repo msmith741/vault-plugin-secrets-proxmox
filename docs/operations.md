@@ -13,17 +13,17 @@ Authenticate to Vault with the approved operator identity:
 vault status
 vault plugin info -type=secret vault-plugin-secrets-proxmox
 vault secrets list -detailed
-vault read proxmox/config
-vault list proxmox/role
+vault read proxmox-deploy/config
+vault list proxmox-deploy/role
 ```
 
-`vault read proxmox/config` excludes `token_secret`; ensure it returns only the expected issuer metadata. Do **not** query `proxmox/creds/<role>` as a passive health check: that endpoint **creates a real token**.
+`vault read proxmox-deploy/config` excludes `token_secret`; ensure it returns only the expected issuer metadata. Do **not** query `proxmox/creds/<role>` as a passive health check: that endpoint **creates a real token**.
 
 Use a dedicated, scheduled **disposable** issuance/revocation test only when it is explicitly authorized, and track its lease. Monitor vault audit logs and Proxmox API-token creation/deletion events; treat unexpected issuance volumes, 403s, issuer changes or revoke failures as alerts.
 
 ## Issuance and cleanup
 
-A credential consumer reads a role-specific path; for example `vault read proxmox/creds/workload`. The token is non-renewable. On job completion, revoke using the exact lease ID:
+A credential consumer reads a role-specific path; for example `vault read proxmox-deploy/creds/deployer`. The token is non-renewable. On job completion, revoke using the exact lease ID:
 
 ```sh
 vault lease lookup "<EXACT_LEASE_ID>"
@@ -54,19 +54,36 @@ A process crash or terminated CI runner may skip cleanup. Never assume that an `
 
 ## Issuer rotation
 
-**A currently issued lease captures the target identity but not the original issuer credential.** Its revoke callback uses whichever issuer is currently configured on the mount.
+The recommended issuer is **a restricted same-user PVE-realm password**,
+not a cross-user API token. Vault authenticates with a fresh Proxmox ticket
+for each token creation/deletion. The password is stored in mount config
+and is not returned from `vault read <mount>/config`.
 
-Recommended sequence:
+For controlled password rotation:
 
-1. Inventory outstanding leases and target tokens for the mount and determine the latest native expiry.
-2. Suspend **new issuance** (deny the consumer ACL path or pause the calling workload).
-3. Revoke outstanding leases with the **old** issuer, confirm each Proxmox token is gone or expired, and resolve failures.
-4. Create a replacement issuer token with audited, restricted permissions.
-5. Write the new `token_id` / `token_secret` to `<mount>/config` using stdin, leaving the target issuer user/realm unchanged unless a different reviewed identity is required.
-6. Perform a controlled disposable-credential create/delete check through Vault.
-7. Re-enable consumers; monitor revoke and 403 rates.
+1. Pause new issuance and inventory outstanding leases for this mount.
+2. As a Proxmox administrator, rotate the password of the **same restricted**
+   PVE-realm account. Do not change its user or realm.
+3. Securely submit the replacement password to Vault:
 
-Do not delete the old Proxmox issuer account/token prematurely if outstanding leases may still require it. Avoid rotating Proxmox issuer identity, token and endpoint all at once.
+```bash
+set +x
+read -r -s -p "New issuer password: " NEW_ISSUER_PASSWORD
+printf '\n'
+printf '%s' "$NEW_ISSUER_PASSWORD" | vault write proxmox-deploy/config \
+  auth_method=password password=-
+unset NEW_ISSUER_PASSWORD
+```
+
+4. Issue a disposable credential and revoke its lease synchronously.
+5. Verify old outstanding leases still revoke and confirm their token IDs
+   are removed from Proxmox before resuming consumers.
+
+**Important:** The engine configuration includes a single current
+issuer password, not immutable issuer history. Never rotate the user
+identity itself with leases outstanding. Legacy cross-user leases may
+still require their old issuer's token-management authority; migrate
+and clear them separately.
 
 ## Plugin upgrades — versioned, reversible
 
@@ -89,8 +106,8 @@ vault plugin register \
   -version="v0.2.0" \
   secret vault-plugin-secrets-proxmox
 
-vault secrets tune -plugin-version="v0.2.0" proxmox/
-vault plugin reload -mounts=proxmox/
+vault secrets tune -plugin-version="v0.2.0" proxmox-deploy/
+vault plugin reload -mounts=proxmox-deploy/
 vault secrets list -detailed
 ```
 
@@ -103,8 +120,8 @@ Record the old and new catalog versions and checksums, your Vault server version
 If the upgrade fails and the previous binary and plugin version are still registered:
 
 ```sh
-vault secrets tune -plugin-version="<PREVIOUS_REGISTERED_VERSION>" proxmox/
-vault plugin reload -mounts=proxmox/
+vault secrets tune -plugin-version="<PREVIOUS_REGISTERED_VERSION>" proxmox-deploy/
+vault plugin reload -mounts=proxmox-deploy/
 vault secrets list -detailed
 ```
 
@@ -143,7 +160,7 @@ Avoid `vault lease revoke -force -prefix` during normal operations; it can remov
 Only after pausing issuance, enumerating and revoking outstanding leases, confirming tokens are removed/expired, and backing up configuration:
 
 ```sh
-vault secrets disable proxmox/
+vault secrets disable proxmox-deploy/
 ```
 
 Remove the plugin catalog version and on-disk artifact only after verifying no other mounts or rollback plan requires them. A catalog entry may be shared by multiple separately configured mounts.
@@ -154,7 +171,7 @@ Remove the plugin catalog version and on-disk artifact only after verifying no o
 |---|---|---|
 | Plugin not registered / checksum mismatch | Binary missing, wrong SHA, wrong path, stale version | `vault plugin info`, check files on every Vault node |
 | Mount fails to start | Unsupported binary architecture or Vault SDK/runtime mismatch | Confirm OS/architecture, Vault service logs and plugin checksum |
-| `config` missing | Issuer mount never configured | `vault read proxmox/config`; do not issue test tokens yet |
+| `config` missing | Issuer mount never configured | `vault read proxmox-deploy/config`; do not issue test tokens yet |
 | Configuration rejected | URL isn't HTTPS `/api2/json`, token fields missing, invalid CA/timeout | Check non-secret input and certificate chain |
 | Unknown certificate authority | Proxmox internal CA is not trusted | Use correct `ca_cert_pem`; do not disable TLS verification |
 | HTTP 401 | Issuer token absent, expired or malformed | Verify issuer ID and token status with Proxmox administrator |

@@ -20,7 +20,7 @@ The runner has no need for repository secrets, a VPN, your Vault address, a Prox
 4. It starts a real **Vault 1.21.4** process in disposable development mode on `127.0.0.1:8200`. Vault's plugin directory contains the newly compiled binary.
 5. The harness registers the plugin with its SHA-256, mounts the secrets engine, configures an issuer with the local CA, creates Vault roles and an isolated consumer ACL.
 6. It reads a generated Proxmox token through a restricted Vault identity and checks the returned lease, role mapping, native expiration and mock authentication.
-7. It changes the underlying Vault role and revokes the original lease, verifying the original Proxmox token has been deleted. A second token is allowed to expire naturally after a one-minute Vault TTL, confirming Vault's expiration manager also deletes it automatically and that lease renewal is refused. It also tests a simulated Proxmox **403**, refusal of `root@pam` issuance and rejection of an untrusted HTTPS certificate.
+7. It changes the underlying Vault role and revokes the original lease, verifying the original Proxmox token has been deleted. A second token is allowed to expire naturally after a one-minute Vault TTL, confirming Vault's expiration manager also deletes it automatically and that lease renewal is refused. It also verifies a cross-user request is rejected locally before reaching the simulated API, refusal of `root@pam` issuance and rejection of an untrusted HTTPS certificate.
 8. The workflow attempts to stop both local processes even on failure, and the disposable runner is destroyed.
 
 ## Checks performed
@@ -57,14 +57,16 @@ The suite can also run on an isolated local machine using its checked-in workflo
 
 ## Real Proxmox authorization tests
 
-In addition to the simulated Proxmox workflow above, the repository includes a
-[real Proxmox VE authorization test](real-proxmox-testing.md) using a disposable,
-privileged **Proxmox VE 9.2.2 container** on a GitHub-hosted runner. It verifies
-actual PVE authentication, token creation/deletion and native expiry.
+In addition to the simulated Proxmox workflow above, GitHub Actions runs
+[real Proxmox VE 9.2.2 authorization tests](real-proxmox-testing.md)
+using a disposable privileged container. Separate restricted users,
+each with an independent Vault mount and password-ticket issuer, have
+successfully created and revoked real expiring tokens.
 
-**Security finding:** In this container, a non-root API-token issuer granted
-`PVEUserAdmin` on `/access` could create a token for `root@pam`. The test
-deletes the probe token and fails its production-readiness security gate.
-A restricted workload token did **not** self-mint a replacement (HTTP 403).
-The workflow is test-only and must not be interpreted as permission to use
-broad cross-user issuer privileges in production.
+The suite also confirms that the plugin blocks cross-user token issuance,
+even when a deliberately overprivileged issuer could mint an authenticating
+`root@pam` token **directly through the Proxmox API**. A restricted workload
+token was denied the ability to mint another token (HTTP 403).
+
+The documented CI findings do not replace independent acceptance testing
+on the intended production Proxmox and Vault versions.

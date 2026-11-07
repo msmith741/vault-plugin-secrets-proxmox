@@ -62,7 +62,7 @@ Build/target architecture must match the Vault node. The supplied release config
 
 The historical acceptance suite is gated behind `VAULT_ACC=1` and depends on additional `VAULT_PROXMOX_*` environment variables. **Never set `VAULT_ACC=1` in ordinary CI or against production Proxmox.** These tests can create and delete tokens and may leave credentials behind if cleanup fails. Before executing, review `backend_test.go`, use dedicated disposable accounts, verify all target IDs, and obtain explicit authorization from the environment owner.
 
-The first gate is now automated on GitHub-hosted runners; see [Ephemeral integration testing](testing.md) for exact coverage and manual reruns.
+The synthetic gate and real-Proxmox password-ticket same-user gate are automated on GitHub-hosted runners; see [Ephemeral integration testing](testing.md) and [Real Proxmox integration testing](real-proxmox-testing.md) for coverage and reruns.
 
 Separate acceptance into two gates:
 
