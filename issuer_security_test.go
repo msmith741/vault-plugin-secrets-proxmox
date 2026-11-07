@@ -93,8 +93,49 @@ func TestVaultPasswordIssuerConfigDoesNotExposePassword(t *testing.T) {
 	if _, ok := read.Data["password"]; ok {
 		t.Fatal("issuer password leaked in Vault config read")
 	}
+	// Rotation must update the secret without exposing it in the response.
+	rotated, err := b.HandleRequest(ctx, &logical.Request{
+		Operation: logical.UpdateOperation, Path: "config", Storage: storage,
+		Data: map[string]interface{}{"password": "rotated-synthetic-only"},
+	})
+	if err != nil || (rotated != nil && rotated.IsError()) {
+		t.Fatalf("password rotation failed: response=%v error=%v", rotated, err)
+	}
+	afterRotation, err := getConfig(ctx, storage)
+	if err != nil || afterRotation == nil || afterRotation.Password != "rotated-synthetic-only" {
+		t.Fatalf("password rotation was not stored")
+	}
+	// Authentication-mode changes must erase secrets belonging to the old mode.
+	switched, err := b.HandleRequest(ctx, &logical.Request{
+		Operation: logical.UpdateOperation, Path: "config", Storage: storage,
+		Data: map[string]interface{}{
+			"auth_method": "token", "token_id": "bootstrap",
+			"token_secret": "synthetic-token",
+		},
+	})
+	if err != nil || (switched != nil && switched.IsError()) {
+		t.Fatalf("password to token mode switch failed: response=%v error=%v", switched, err)
+	}
+	tokenConfig, err := getConfig(ctx, storage)
+	if err != nil || tokenConfig.Password != "" || authMethod(tokenConfig) != "token" {
+		t.Fatalf("token mode retained a password or has wrong authentication mode")
+	}
+	switchedBack, err := b.HandleRequest(ctx, &logical.Request{
+		Operation: logical.UpdateOperation, Path: "config", Storage: storage,
+		Data: map[string]interface{}{
+			"auth_method": "password", "password": "new-synthetic-password",
+		},
+	})
+	if err != nil || (switchedBack != nil && switchedBack.IsError()) {
+		t.Fatalf("token to password switch failed: response=%v error=%v", switchedBack, err)
+	}
+	passwordConfig, err := getConfig(ctx, storage)
+	if err != nil || passwordConfig.ApiTokenID != "" ||
+		passwordConfig.ApiTokenSecret != "" || passwordConfig.Password != "new-synthetic-password" {
+		t.Fatalf("password mode retained API-token credentials or wrong password")
+	}
 	cfg, err := getConfig(ctx, storage)
-	if err != nil || cfg == nil || cfg.Password != "synthetic-not-real" {
+	if err != nil || cfg == nil || cfg.Password != "new-synthetic-password" {
 		t.Fatal("issuer password was not held in Vault secret storage")
 	}
 }
