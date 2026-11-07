@@ -19,8 +19,11 @@ const (
 // validateRoleLifetime fails closed for legacy roles without explicit
 // lifetimes. Issuance must never generate non-expiring Proxmox tokens.
 func validateRoleLifetime(r *proxmoxRoleEntry) error {
-	if r == nil || r.User == "" || r.Realm == "" {
+	if r == nil {
 		return fmt.Errorf("role requires a Proxmox user and realm")
+	}
+	if err := validatePVEIdentity(r.User, r.Realm); err != nil {
+		return err
 	}
 	if r.TTL < minRoleTTL {
 		return fmt.Errorf("role ttl must be at least %s", minRoleTTL)

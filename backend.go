@@ -74,7 +74,7 @@ func (b *proxmoxBackend) getClient(ctx context.Context, storage logical.Storage)
 	}
 	if authMethod(cfg) == "password" {
 		// Fresh ticket avoids reusing an expired PVE login session.
-		return newClient(cfg)
+		return newClientWithContext(ctx, cfg)
 	}
 	b.lock.RLock()
 	cached := b.client
@@ -97,7 +97,7 @@ func (b *proxmoxBackend) getClient(ctx context.Context, storage logical.Storage)
 	if config == nil {
 		return nil, fmt.Errorf("Proxmox issuer is not configured")
 	}
-	client, err := newClient(config)
+	client, err := newClientWithContext(ctx, config)
 	if err != nil {
 		return nil, err
 	}

@@ -38,7 +38,7 @@ A separate `proxmox-images/` mount can use `images@pve` credentials. Vault polic
 | Legacy issuer auth | `auth_method=token` supported, but still restricted to the same Proxmox user |
 | Native expiration | Proxmox token expiration always finite, based on role TTL |
 | Vault expiration | Nonrenewable Vault leases, explicit revoke and automatic revoke on expiry |
-| TLS | Verified HTTPS; optional `ca_cert_pem` for private certificate authorities |
+| TLS | Verified HTTPS; optional `ca_cert_pem` for private certificate authorities; redirects refused and new issuance rejects insecure TLS or custom headers/proxies |
 | Multiple workloads | Separate Vault mounts with independent issuers, target users and ACL policies |
 | Known limitations | Generated tokens inherit user permissions; no per-token ACLs, orphan reconciler, issuer history or HA/production acceptance certification |
 
@@ -53,6 +53,8 @@ A separate `proxmox-images/` mount can use `images@pve` credentials. Vault polic
 | [Real Proxmox CI](docs/real-proxmox-testing.md) | Containerized Proxmox 9.2.2 tests, verified findings and known limits |
 | [Mock integration CI](docs/testing.md) | Disposable Vault + mock HTTPS Proxmox tests |
 | [Development](docs/development.md) | Build/test tooling, source structure, release process |
+| [Hermes Host Operations](docs/hermes-host-operations.md) | Kubernetes-authenticated MCP integration with ephemeral Proxmox tokens, least-privilege policies and cleanup |
+| [Security audit](docs/audits/2026-11-07-security-review.md) | Reviewed controls, remaining risks, CI evidence and real-integration/production gates |
 
 ## Minimal role example
 
@@ -83,7 +85,7 @@ vault lease revoke "<LEASE_ID_FROM_RESPONSE>"
 
 ## Test status
 
-- Standard Go tests, race detector, build/vet and module checks run in GitHub Actions.
+- Standard Go tests, race detector, build/vet, module checks and pinned `govulncheck` vulnerability scanning run in GitHub Actions.
 - A disposable Vault 1.21.4 process runs the plugin against a synthetic HTTPS Proxmox API.
 - A disposable **real Proxmox VE 9.2.2** container validates same-user password-ticket issuance, Vault lease revocation, native expiry, and denial of cross-user issuance and token self-minting.
 - The real-container suite also demonstrates that granting a non-root issuer global `PVEUserAdmin` can mint an authenticating `root@pam` token, and verifies this plugin refuses to use that issuer for cross-user issuance.

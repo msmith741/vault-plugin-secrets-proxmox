@@ -48,7 +48,7 @@ require (
 	github.com/hashicorp/vault/api v1.23.0
 	github.com/hashicorp/vault/sdk v0.26.0
 	github.com/stretchr/testify v1.12.1
-	golang.org/x/net v0.59.0 // indirect
+	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 )

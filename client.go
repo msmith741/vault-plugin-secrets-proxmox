@@ -6,6 +6,8 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"net/http"
+	neturl "net/url"
 
 	pxapi "github.com/Telmate/proxmox-api-go/proxmox"
 )
@@ -15,6 +17,10 @@ type proxmoxClient struct {
 }
 
 func newClient(config *proxmoxConfig) (*proxmoxClient, error) {
+	return newClientWithContext(context.Background(), config)
+}
+
+func newClientWithContext(ctx context.Context, config *proxmoxConfig) (*proxmoxClient, error) {
 	if config == nil {
 		return nil, errors.New("client configuration was nil")
 	}
@@ -37,7 +43,28 @@ func newClient(config *proxmoxConfig) (*proxmoxClient, error) {
 	// Explicit legacy compatibility flag. Prefer ca_cert_pem.
 	tlsConfig.InsecureSkipVerify = config.SkipCertValidation // #nosec G402 -- opt-in, administrator-only
 
-	c, err := pxapi.NewClient(config.ApiURL, nil, config.HTTPHeaders, tlsConfig, config.ProxyServer, int(config.TaskTimeout.Seconds()), nil)
+	// Never allow Proxmox redirects to forward issuer credentials to a
+	// different endpoint, even if a redirect targets a related hostname.
+	var proxy func(*http.Request) (*neturl.URL, error)
+	if config.ProxyServer != "" {
+		parsed, err := neturl.ParseRequestURI(config.ProxyServer)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+			return nil, errors.New("invalid legacy Proxmox proxy URL")
+		}
+		proxy = http.ProxyURL(parsed)
+	}
+	httpClient := &http.Client{
+		Timeout: config.TaskTimeout,
+		Transport: &http.Transport{
+			TLSClientConfig:    tlsConfig,
+			DisableCompression: true,
+			Proxy:              proxy,
+		},
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	c, err := pxapi.NewClient(config.ApiURL, httpClient, config.HTTPHeaders, tlsConfig, config.ProxyServer, int(config.TaskTimeout.Seconds()), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -45,10 +72,12 @@ func newClient(config *proxmoxConfig) (*proxmoxClient, error) {
 	if authMethod(config) == "password" {
 		// Log in anew for every request operation; do not cache expiring PVE
 		// tickets or persist the password outside Vault's protected storage.
-		ctx, cancel := context.WithTimeout(context.Background(), config.TaskTimeout)
+		loginCtx, cancel := context.WithTimeout(ctx, config.TaskTimeout)
 		defer cancel()
-		if err := c.Login(ctx, config.User+"@"+config.Realm, config.Password, ""); err != nil {
-			return nil, fmt.Errorf("Proxmox issuer login failed: %w", err)
+		if err := c.Login(loginCtx, config.User+"@"+config.Realm, config.Password, ""); err != nil {
+			// Upstream client errors may contain raw server response details.
+			// Do not return issuer secrets to Vault callers or audit logs.
+			return nil, errors.New("Proxmox issuer authentication failed; check endpoint, TLS, identity and audit logs")
 		}
 	} else {
 		c.SetAPIToken(pxapi.ApiToken{

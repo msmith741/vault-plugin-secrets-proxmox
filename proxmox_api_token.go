@@ -86,7 +86,7 @@ func (b *proxmoxBackend) tokenRevoke(ctx context.Context, req *logical.Request, 
 		return nil, fmt.Errorf("error getting client: %w", err)
 	}
 	if err := deleteToken(ctx, client, user, realm, tokenID); err != nil {
-		return nil, fmt.Errorf("error revoking Proxmox token: %w", err)
+		return nil, fmt.Errorf("Proxmox token revoke failed; check Proxmox audit logs")
 	}
 	return nil, nil
 }
