@@ -76,7 +76,7 @@ Do **not** compensate for a permission failure with an unrestricted Proxmox Admi
 
 ## Pre-production acceptance checklist
 
-**Status:** automated mock API tests pass; the following external acceptance tests still require execution in a non-production environment.
+**Status:** unit tests, an HTTPS API simulator, and an ephemeral **real Vault 1.21.4** plugin lifecycle test pass in GitHub Actions. The synthetic coverage includes plugin mounting, consumer Vault ACLs, token issuance and lease revocation. **Real Proxmox permission-boundary tests remain outstanding**; see [Ephemeral integration testing](testing.md).
 
 | Test | Expected result |
 |---|---|
