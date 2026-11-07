@@ -61,6 +61,7 @@ func pathRole(b *proxmoxBackend) []*framework.Path {
 	return []*framework.Path{
 		{
 			Pattern: "role/" + framework.GenericNameRegex("name"),
+			ExistenceCheck: b.pathRoleExistenceCheck,
 			Fields: map[string]*framework.FieldSchema{
 				"name": {
 					Type:        framework.TypeLowerCaseString,
@@ -114,6 +115,22 @@ func pathRole(b *proxmoxBackend) []*framework.Path {
 			HelpDescription: pathRoleListHelpDescription,
 		},
 	}
+}
+
+// pathRoleExistenceCheck is mandatory for CreateOperation in newer Vault SDKs.
+// Resolve existence from plugin storage rather than any Proxmox API call.
+func (b *proxmoxBackend) pathRoleExistenceCheck(
+	ctx context.Context, req *logical.Request, d *framework.FieldData,
+) (bool, error) {
+	name, ok := d.GetOk("name")
+	if !ok || name.(string) == "" {
+		return false, fmt.Errorf("missing role name")
+	}
+	role, err := b.getRole(ctx, req.Storage, name.(string))
+	if err != nil {
+		return false, err
+	}
+	return role != nil, nil
 }
 
 func (b *proxmoxBackend) getRole(ctx context.Context, s logical.Storage, name string) (*proxmoxRoleEntry, error) {
