@@ -2,7 +2,7 @@ package proxmox
 
 import (
 	"context"
-	"encoding/base64"
+	"encoding/pem"
 	"crypto/tls"
 	"net/http"
 	"net/http/httptest"
@@ -150,23 +150,5 @@ func tlsCertPEM(t *testing.T, c *tls.Config) []byte {
 	if len(c.Certificates) == 0 {
 		t.Fatal("test TLS endpoint has no certificates")
 	}
-	return append([]byte("-----BEGIN CERTIFICATE-----\n"),
-		append([]byte(strings.Join(splitPEM(base64Encode(c.Certificates[0].Certificate[0])), "\n")),
-			[]byte("\n-----END CERTIFICATE-----\n")...)...)
-}
-
-func base64Encode(data []byte) string {
-	return base64.StdEncoding.EncodeToString(data)
-}
-
-func splitPEM(src string) []string {
-	var lines []string
-	for len(src) > 64 {
-		lines = append(lines, src[:64])
-		src = src[64:]
-	}
-	if src != "" {
-		lines = append(lines, src)
-	}
-	return lines
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: c.Certificates[0].Certificate[0]})
 }
