@@ -41,21 +41,21 @@ func validateRoleLifetime(r *proxmoxRoleEntry) error {
 }
 
 type proxmoxRoleEntry struct {
-	Name   string        `json:"name"`
-	User   string        `json:"user"`
-	Realm  string        `json:"realm"`
-	TTL    time.Duration `json:"ttl"`
-	MaxTTL time.Duration `json:"max_ttl"`
-	InheritUserPrivileges bool `json:"inherit_user_privileges"`
+	Name                  string        `json:"name"`
+	User                  string        `json:"user"`
+	Realm                 string        `json:"realm"`
+	TTL                   time.Duration `json:"ttl"`
+	MaxTTL                time.Duration `json:"max_ttl"`
+	InheritUserPrivileges bool          `json:"inherit_user_privileges"`
 }
 
 func (r *proxmoxRoleEntry) toResponseData() map[string]interface{} {
 	respData := map[string]interface{}{
-		"name":    r.Name,
-		"user":    r.User,
-		"realm":   r.Realm,
-		"ttl":     r.TTL.Seconds(),
-		"max_ttl": r.MaxTTL.Seconds(),
+		"name":                    r.Name,
+		"user":                    r.User,
+		"realm":                   r.Realm,
+		"ttl":                     r.TTL.Seconds(),
+		"max_ttl":                 r.MaxTTL.Seconds(),
 		"inherit_user_privileges": r.InheritUserPrivileges,
 	}
 	return respData
