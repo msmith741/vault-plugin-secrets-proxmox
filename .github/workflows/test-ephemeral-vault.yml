@@ -1,0 +1,128 @@
+name: Ephemeral Vault plugin integration test
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - "tests/e2e/**"
+      - ".github/workflows/test-ephemeral-vault.yml"
+  push:
+    branches: [main]
+    paths:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - "tests/e2e/**"
+      - ".github/workflows/test-ephemeral-vault.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  vault-plugin-e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      VAULT_ADDR: "http://127.0.0.1:8200"
+      VAULT_TOKEN: "ci-only-vault-dev-token"
+      VAULT_VERSION: "1.21.4"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27.3"
+          cache: true
+
+      - name: Build standalone plugin
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/plugins"
+          CGO_ENABLED=0 go build -trimpath \
+            -o "$RUNNER_TEMP/plugins/vault-plugin-secrets-proxmox" \
+            ./cmd/vault-plugin-secrets-proxmox
+          chmod 0755 "$RUNNER_TEMP/plugins/vault-plugin-secrets-proxmox"
+
+      - name: Install checksum-verified HashiCorp Vault binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://releases.hashicorp.com/vault/${VAULT_VERSION}"
+          filename="vault_${VAULT_VERSION}_linux_amd64.zip"
+          curl --fail --silent --show-error --location \
+            --output "$RUNNER_TEMP/$filename" "$base/$filename"
+          curl --fail --silent --show-error --location \
+            --output "$RUNNER_TEMP/SHA256SUMS" "$base/vault_${VAULT_VERSION}_SHA256SUMS"
+          ( cd "$RUNNER_TEMP" && grep -F " $filename" SHA256SUMS | sha256sum --check - )
+          mkdir -p "$RUNNER_TEMP/vault-bin"
+          unzip -q "$RUNNER_TEMP/$filename" -d "$RUNNER_TEMP/vault-bin"
+          echo "$RUNNER_TEMP/vault-bin" >> "$GITHUB_PATH"
+
+      - name: Start loopback HTTPS Proxmox mock
+        shell: bash
+        run: |
+          set -euo pipefail
+          openssl req -x509 -newkey rsa:2048 -nodes \
+            -keyout "$RUNNER_TEMP/mock-key.pem" \
+            -out "$RUNNER_TEMP/mock-cert.pem" -days 1 \
+            -subj "/CN=localhost" \
+            -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
+            >/dev/null 2>&1
+          python3 tests/e2e/mock_proxmox_api.py \
+            --cert "$RUNNER_TEMP/mock-cert.pem" \
+            --key "$RUNNER_TEMP/mock-key.pem" \
+            --port 8843 >"$RUNNER_TEMP/mock-proxmox.log" 2>&1 &
+          echo "$!" >"$RUNNER_TEMP/mock-proxmox.pid"
+
+          for i in {1..40}; do
+            if curl --silent --fail --cacert "$RUNNER_TEMP/mock-cert.pem" \
+              https://localhost:8843/__test__/state >/dev/null; then break; fi
+            sleep 0.5
+          done
+          curl --silent --show-error --fail \
+            --cacert "$RUNNER_TEMP/mock-cert.pem" \
+            https://localhost:8843/__test__/state >/dev/null
+
+      - name: Start temporary Vault development server
+        shell: bash
+        run: |
+          set -euo pipefail
+          vault server -dev \
+            -dev-root-token-id="$VAULT_TOKEN" \
+            -dev-no-store-token \
+            -dev-listen-address="127.0.0.1:8200" \
+            -dev-plugin-dir="$RUNNER_TEMP/plugins" \
+            >"$RUNNER_TEMP/vault.log" 2>&1 &
+          echo "$!" >"$RUNNER_TEMP/vault.pid"
+
+          for i in {1..50}; do
+            if vault status >/dev/null 2>&1; then break; fi
+            sleep 0.5
+          done
+          vault status >/dev/null
+          echo "Temporary Vault server is initialized and unsealed."
+
+      - name: Verify actual Vault plugin lifecycle against mock Proxmox
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tests/e2e/run_vault_e2e.py \
+            --plugin "$RUNNER_TEMP/plugins/vault-plugin-secrets-proxmox" \
+            --ca "$RUNNER_TEMP/mock-cert.pem"
+
+      - name: Stop ephemeral test processes
+        if: always()
+        shell: bash
+        run: |
+          for name in vault mock-proxmox; do
+            if [ -f "$RUNNER_TEMP/$name.pid" ]; then
+              kill "$(cat "$RUNNER_TEMP/$name.pid")" 2>/dev/null || true
+            fi
+          done
+          echo "Temporary Vault and Proxmox mock processes stopped."
