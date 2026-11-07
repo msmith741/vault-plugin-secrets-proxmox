@@ -6,8 +6,7 @@ on:
       - "**/*.go"
       - "go.mod"
       - "go.sum"
-      - ".github/workflows/validate-go.yml"
-      - ".github/workflows/release.yml"
+      - ".github/workflows/**"
       - ".goreleaser.yaml"
   push:
     branches: [main]
@@ -15,7 +14,7 @@ on:
       - "**/*.go"
       - "go.mod"
       - "go.sum"
-      - ".github/workflows/validate-go.yml"
+      - ".github/workflows/**"
 
 permissions:
   contents: read
