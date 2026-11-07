@@ -262,6 +262,42 @@ def run(args):
             print("SECURITY WARNING: cross-user token management needed global /access user administration",
                   flush=True)
             report.append("- Issuer privilege boundary: **global /access role required; review before production**")
+
+            # Determine whether a broadly delegated issuer can mint for other
+            # accounts beyond the one named in the Vault role. The fixture
+            # accounts, including root@pam, exist ONLY inside this runner.
+            for other_user, probe_id in (
+                (IMAGE_USER, "ci-unrelated-user"),
+                ("root@pam", "ci-root-risk-probe"),
+            ):
+                probe = pve.token(
+                    "POST", other_user, probe_id, auth=restricted_auth,
+                    fields={"expire": int(time.time()) + 90, "privsep": 0},
+                )
+                if probe[0] == 200:
+                    print(f"SECURITY WARNING: delegated issuer can mint for {other_user}",
+                          flush=True)
+                    report.append(
+                        f"- Delegated issuer can create token for {other_user}: **YES**"
+                    )
+                    try:
+                        if other_user == "root@pam":
+                            critical.append(
+                                "non-root delegated issuer can create a root@pam token"
+                            )
+                    finally:
+                        check(
+                            pve.token("DELETE", other_user, probe_id)[0] == 200,
+                            f"removed privileged probe token for {other_user}",
+                        )
+                else:
+                    check(
+                        probe[0] in (401, 403),
+                        f"issuer denied minting unrelated token for {other_user}",
+                    )
+                    report.append(
+                        f"- Delegated issuer can create token for {other_user}: no (HTTP {probe[0]})"
+                    )
     else:
         print("SECURITY GATE: cross-user token issuance remained denied with tested scopes",
               flush=True)
