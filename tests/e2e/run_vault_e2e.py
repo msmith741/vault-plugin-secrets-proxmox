@@ -96,7 +96,7 @@ def main():
     # Intentionally absent CA test: Vault must reject untrusted endpoints.
     ca_params = ["ca_cert_pem=@" + str(cert)]
     issuer_params = [
-        "user=issuer", "realm=pve", "token_id=bootstrap",
+        "user=workload", "realm=pve", "token_id=bootstrap",
         "token_secret=-", f"proxmox_url={args.mock_url}/api2/json",
         "timeout=20", "insecure_skip_tls_verify=false",
     ]
@@ -225,8 +225,8 @@ def main():
     vault("read", f"{mount}/creds/denied", expect_success=False)
     state = mock_get(args.mock_url, cert, "/__test__/state")
     check(
-        state["rejected"] >= 1 and len(state["active"]) == 0,
-        "simulated Proxmox 403 fails issuance without leaving active credentials",
+        state["rejected"] == 0 and len(state["active"]) == 0,
+        "cross-user target is rejected locally before contacting Proxmox",
     )
 
     # Distinct mount uses no CA certificate. The fake Proxmox endpoint has an
