@@ -57,6 +57,20 @@ This is a snapshot of **known** vulnerabilities on the audit date, not a
 guarantee that new advisories will not appear. Keep scanning on every code
 change and ahead of each production binary release.
 
+## Release workflow gate
+
+The tag-triggered [release workflow](../../.github/workflows/release.yml)
+now separates a read-only **verify** job from the job holding
+`contents: write` for GitHub release publication. Before GoReleaser can
+publish a tag, the candidate commit must be reachable from `main`, module
+checksums and module graph must pass, race tests and `go vet` must succeed,
+and the pinned `govulncheck` scan must report no known reachable
+vulnerabilities. The publishing job runs **only after** verification passes.
+
+This gate improves release discipline but does **not** replace protected
+branch/tag permissions, review requirements or signing and independent
+verification of release artifacts. Apply those repository settings separately.
+
 ## Residual risks and explicit production gates
 
 | Severity | Finding / residual risk | Required release action |
