@@ -1,6 +1,7 @@
 package proxmox
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -41,13 +42,22 @@ func newClient(config *proxmoxConfig) (*proxmoxClient, error) {
 		return nil, err
 	}
 
-	c.SetAPIToken(pxapi.ApiToken{
-		ID: pxapi.ApiTokenID{
-			User:      pxapi.UserID{Name: config.User, Realm: config.Realm},
-			TokenName: pxapi.ApiTokenName(config.ApiTokenID),
-		},
-		Secret: pxapi.ApiTokenSecret(config.ApiTokenSecret),
-	})
-
+	if authMethod(config) == "password" {
+		// Log in anew for every request operation; do not cache expiring PVE
+		// tickets or persist the password outside Vault's protected storage.
+		ctx, cancel := context.WithTimeout(context.Background(), config.TaskTimeout)
+		defer cancel()
+		if err := c.Login(ctx, config.User+"@"+config.Realm, config.Password, ""); err != nil {
+			return nil, fmt.Errorf("Proxmox issuer login failed: %w", err)
+		}
+	} else {
+		c.SetAPIToken(pxapi.ApiToken{
+			ID: pxapi.ApiTokenID{
+				User: pxapi.UserID{Name: config.User, Realm: config.Realm},
+				TokenName: pxapi.ApiTokenName(config.ApiTokenID),
+			},
+			Secret: pxapi.ApiTokenSecret(config.ApiTokenSecret),
+		})
+	}
 	return &proxmoxClient{c}, nil
 }

@@ -65,6 +65,17 @@ func (b *proxmoxBackend) invalidate(ctx context.Context, key string) {
 }
 
 func (b *proxmoxBackend) getClient(ctx context.Context, storage logical.Storage) (*proxmoxClient, error) {
+	cfg, err := getConfig(ctx, storage)
+	if err != nil {
+		return nil, err
+	}
+	if cfg == nil {
+		return nil, fmt.Errorf("Proxmox issuer is not configured")
+	}
+	if authMethod(cfg) == "password" {
+		// Fresh ticket avoids reusing an expired PVE login session.
+		return newClient(cfg)
+	}
 	b.lock.RLock()
 	cached := b.client
 	b.lock.RUnlock()

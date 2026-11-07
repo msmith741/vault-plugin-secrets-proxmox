@@ -53,6 +53,13 @@ func (b *proxmoxBackend) createToken(ctx context.Context, s logical.Storage, rol
 	if err != nil {
 		return nil, err
 	}
+	config, err := getConfig(ctx, s)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateIssuerTarget(config, role.User, role.Realm); err != nil {
+		return nil, err
+	}
 	client, err := b.getClient(ctx, s)
 	if err != nil {
 		return nil, err
