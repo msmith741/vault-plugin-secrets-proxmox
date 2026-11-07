@@ -2,6 +2,7 @@ package proxmox
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 
@@ -63,34 +64,34 @@ func (b *proxmoxBackend) invalidate(ctx context.Context, key string) {
 	}
 }
 
-func (b *proxmoxBackend) getClient(ctx context.Context, s logical.Storage) (*proxmoxClient, error) {
+func (b *proxmoxBackend) getClient(ctx context.Context, storage logical.Storage) (*proxmoxClient, error) {
 	b.lock.RLock()
-	unlockFunc := b.lock.RUnlock
-	defer func() { unlockFunc() }()
+	cached := b.client
+	b.lock.RUnlock()
+	if cached != nil {
+		return cached, nil
+	}
 
+	b.lock.Lock()
+	defer b.lock.Unlock()
+	// Recheck after acquiring the write lock. Concurrent reads must not
+	// overwrite a newly initialized client.
 	if b.client != nil {
 		return b.client, nil
 	}
-
-	b.lock.RUnlock()
-	b.lock.Lock()
-	unlockFunc = b.lock.Unlock
-
-	config, err := getConfig(ctx, s)
+	config, err := getConfig(ctx, storage)
 	if err != nil {
 		return nil, err
 	}
-
 	if config == nil {
-		config = new(proxmoxConfig)
+		return nil, fmt.Errorf("Proxmox issuer is not configured")
 	}
-
-	b.client, err = newClient(config)
+	client, err := newClient(config)
 	if err != nil {
 		return nil, err
 	}
-
-	return b.client, nil
+	b.client = client
+	return client, nil
 }
 
 const backendHelp = `

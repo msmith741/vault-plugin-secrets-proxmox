@@ -26,7 +26,7 @@ func TestRoleLifetimeValidation(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := validateRoleLifetime(&proxmoxRoleEntry{User: "vm", Realm: "pve", TTL: tc.ttl, MaxTTL: tc.max})
+			err := validateRoleLifetime(&proxmoxRoleEntry{User: "vm", Realm: "pve", TTL: tc.ttl, MaxTTL: tc.max, InheritUserPrivileges: true})
 			if (err == nil) != tc.ok {
 				t.Fatalf("validateRoleLifetime() error = %v, want valid=%v", err, tc.ok)
 			}
@@ -41,7 +41,7 @@ func TestRoleDefaultsAndRejectsZeroTTL(t *testing.T) {
 		Operation: logical.CreateOperation,
 		Path:      "role/new-role",
 		Storage:   storage,
-		Data:      map[string]interface{}{"user": "vm", "realm": "pve"},
+		Data:      map[string]interface{}{"user": "vm", "realm": "pve", "inherit_user_privileges": true},
 	}
 	response, err := b.HandleRequest(ctx, req)
 	if err != nil || response != nil {
@@ -101,7 +101,7 @@ func TestRevocationIdentitySurvivesRoleChanges(t *testing.T) {
 	// Old leases can fall back to their role while it still exists.
 	if err := setRole(ctx, storage, "legacy", &proxmoxRoleEntry{
 		Name: "legacy", User: "tofu-images", Realm: "pve",
-		TTL: defaultRoleTTL, MaxTTL: defaultRoleMaxTTL,
+		TTL: defaultRoleTTL, MaxTTL: defaultRoleMaxTTL, InheritUserPrivileges: true,
 	}); err != nil {
 		t.Fatal(err)
 	}

@@ -45,7 +45,7 @@ Optional config fields include `insecure_skip_tls_verify`, `http_headers`, `prox
 
 3. Create a role for the Proxmox user you are going to create tokens for
 ```sh
-vault write proxmox/role/alice user="alice" realm="pve"
+vault write proxmox/role/alice user="alice" realm="pve" ttl=30m max_ttl=1h inherit_user_privileges=true
 ```
 
 4. To test that it works, retrieve a new Proxmox API token from Vault
@@ -89,8 +89,8 @@ credential, if the issuer API scopes must be isolated. Within each mount,
 define a role with a dedicated **least-privileged Proxmox user**:
 
 ```sh
-vault write proxmox-images/role/image-builder user=tofu-images realm=pve ttl=30m max_ttl=1h
-vault write proxmox-vms/role/vm-deployer user=tofu-vm realm=pve ttl=30m max_ttl=1h
+vault write proxmox-images/role/image-builder user=tofu-images realm=pve ttl=30m max_ttl=1h inherit_user_privileges=true
+vault write proxmox-vms/role/vm-deployer user=tofu-vm realm=pve ttl=30m max_ttl=1h inherit_user_privileges=true
 ```
 
 Each generated token currently uses `privsep=false` and inherits its
@@ -127,3 +127,13 @@ go test ./...
 go vet ./...
 go build ./cmd/vault-plugin-secrets-proxmox
 ```
+
+## Pre-integration hardening
+
+**Do not deploy directly to production Vault yet.** See [Pre-integration security review](docs/pre-integration-security-review.md).
+
+The plugin still creates Proxmox tokens with `privsep=false`. Each role **must** set `inherit_user_privileges=true` to explicitly acknowledge that all privileges of its Proxmox user are inherited; the plugin refuses `root@pam` role issuance. This acknowledgement does not protect against token self-minting. Assign narrowly scoped Proxmox users and test whether temporary tokens can create replacement API tokens.
+
+For servers with a private CA, configure `ca_cert_pem` with the actual PEM certificate chain, not `insecure_skip_tls_verify=true`. The Proxmox API endpoint must use HTTPS and end in `/api2/json`. Issuer credentials remain private in plugin storage and must not be pasted into source control, CI logs or shell history.
+
+Changing the issuer credentials during an active lease can break later revocations. Keep the old issuer's authority until old leases have expired or been revoked and verified in Proxmox. Preserve break-glass administrator access outside Vault.

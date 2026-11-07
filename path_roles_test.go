@@ -25,10 +25,11 @@ func TestUserRole(t *testing.T) {
 			_, err := testTokenRoleCreate(t, b, s,
 				roleName+strconv.Itoa(i),
 				map[string]interface{}{
-					"user":    testUser,
-					"realm":   testRealm,
-					"ttl":     testTTL,
-					"max_ttl": testMaxTTL,
+					"user":                    testUser,
+					"realm":                   testRealm,
+					"ttl":                     testTTL,
+					"max_ttl":                 testMaxTTL,
+					"inherit_user_privileges": true,
 				})
 			require.NoError(t, err)
 		}
@@ -40,10 +41,11 @@ func TestUserRole(t *testing.T) {
 
 	t.Run("Create User Role - pass", func(t *testing.T) {
 		resp, err := testTokenRoleCreate(t, b, s, roleName, map[string]interface{}{
-			"user":    user,
-			"realm":   realm,
-			"ttl":     testTTL,
-			"max_ttl": testMaxTTL,
+			"user":                    "test-deployer",
+			"realm":                   "pve",
+			"ttl":                     testTTL,
+			"max_ttl":                 testMaxTTL,
+			"inherit_user_privileges": true,
 		})
 
 		require.Nil(t, err)
@@ -56,8 +58,8 @@ func TestUserRole(t *testing.T) {
 		require.Nil(t, err)
 		require.Nil(t, resp.Error())
 		require.NotNil(t, resp)
-		require.Equal(t, user, resp.Data["user"])
-		require.Equal(t, realm, resp.Data["realm"])
+		require.Equal(t, "test-deployer", resp.Data["user"])
+		require.Equal(t, "pve", resp.Data["realm"])
 	})
 	t.Run("Update User Role", func(t *testing.T) {
 		resp, err := testTokenRoleUpdate(t, b, s, map[string]interface{}{
@@ -77,7 +79,7 @@ func TestUserRole(t *testing.T) {
 		require.Nil(t, resp.Error())
 		require.NotNil(t, resp)
 		require.Equal(t, "Claire", resp.Data["user"])
-		require.Equal(t, realm, resp.Data["realm"])
+		require.Equal(t, "pve", resp.Data["realm"])
 	})
 
 	t.Run("Delete User Role", func(t *testing.T) {
