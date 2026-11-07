@@ -2,8 +2,11 @@ package proxmox
 
 import (
 	"context"
+	"crypto/x509"
 	"errors"
 	"fmt"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/vault/sdk/framework"
@@ -24,6 +27,36 @@ type proxmoxConfig struct {
 	HTTPHeaders        string        `json:"http_headers"`
 	ProxyServer        string        `json:"proxy_server"`
 	TaskTimeout        time.Duration `json:"timeout"`
+	CACertPEM          string        `json:"ca_cert_pem"`
+}
+
+// Validate the privileged issuer endpoint before it can be persisted.
+func validateConfig(c *proxmoxConfig) error {
+	if c == nil {
+		return fmt.Errorf("issuer configuration is missing")
+	}
+	if strings.TrimSpace(c.User) == "" || strings.TrimSpace(c.Realm) == "" {
+		return fmt.Errorf("issuer user and realm must be set")
+	}
+	if strings.TrimSpace(c.ApiTokenID) == "" || strings.TrimSpace(c.ApiTokenSecret) == "" {
+		return fmt.Errorf("issuer token_id and token_secret must be set")
+	}
+	endpoint, err := url.Parse(c.ApiURL)
+	if err != nil || endpoint.Scheme != "https" || endpoint.Host == "" ||
+		endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" ||
+		endpoint.Path != "/api2/json" || endpoint.Opaque != "" {
+		return fmt.Errorf("proxmox_url must be an HTTPS URL ending in /api2/json, without credentials, query or fragment")
+	}
+	if c.TaskTimeout < time.Second || c.TaskTimeout > 5*time.Minute {
+		return fmt.Errorf("timeout must be between 1 and 300 seconds")
+	}
+	if c.CACertPEM != "" {
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM([]byte(c.CACertPEM)) {
+			return fmt.Errorf("ca_cert_pem must contain at least one PEM certificate")
+		}
+	}
+	return nil
 }
 
 func pathConfig(b *proxmoxBackend) *framework.Path {
@@ -79,6 +112,14 @@ func pathConfig(b *proxmoxBackend) *framework.Path {
 				Default:     false,
 				DisplayAttrs: &framework.DisplayAttributes{
 					Name: "Skip TLS Verify",
+				},
+			},
+			"ca_cert_pem": {
+				Type:        framework.TypeString,
+				Description: "Optional PEM-encoded certificate authorities for the Proxmox HTTPS endpoint.",
+				DisplayAttrs: &framework.DisplayAttributes{
+					Name:      "Proxmox CA certificates",
+					Sensitive: true,
 				},
 			},
 			"http_headers": {
@@ -142,6 +183,9 @@ func (b *proxmoxBackend) pathConfigRead(ctx context.Context, req *logical.Reques
 	c, err := getConfig(ctx, req.Storage)
 	if err != nil {
 		return nil, err
+	}
+	if c == nil {
+		return nil, nil
 	}
 
 	return &logical.Response{
@@ -223,12 +267,18 @@ func (b *proxmoxBackend) pathConfigWrite(ctx context.Context, req *logical.Reque
 		config.ProxyServer = data.GetDefaultOrZero("proxy_server").(string)
 	}
 
+	if ca, ok := data.GetOk("ca_cert_pem"); ok {
+		config.CACertPEM = ca.(string)
+	}
 	if taskTimeout, ok := data.GetOk("timeout"); ok {
 		config.TaskTimeout = time.Duration(taskTimeout.(int)) * time.Second
 	} else if !ok && createOperation {
 		config.TaskTimeout = time.Duration(data.GetDefaultOrZero("timeout").(int)) * time.Second
 	}
 
+	if err := validateConfig(config); err != nil {
+		return logical.ErrorResponse(err.Error()), nil
+	}
 	entry, err := logical.StorageEntryJSON(configStoragePath, config)
 	if err != nil {
 		return nil, err
