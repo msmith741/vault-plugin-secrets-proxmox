@@ -11,6 +11,7 @@ import os
 import ssl
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -182,6 +183,37 @@ def main():
     )
     mock_get(args.mock_url, cert, "/__test__/authenticate", auth=combined, expected=401)
     check(True, "revoked token no longer authenticates")
+
+    # Let a second Vault lease expire naturally. This exercises Vault's
+    # expiration manager invoking the plugin's revoke callback, independently
+    # of the explicit lease revoke path above.
+    vault(
+        "write", f"{mount}/role/auto-expiry",
+        "user=workload", "realm=pve", "ttl=1m", "max_ttl=2m",
+        "inherit_user_privileges=true",
+    )
+    timed = vault_json("read", "-format=json", f"{mount}/creds/auto-expiry")
+    timed_lease = timed["lease_id"]
+    check(
+        timed.get("renewable", timed.get("lease_renewable")) is False,
+        "automatically expiring Vault lease is non-renewable",
+    )
+    vault("lease", "renew", timed_lease, expect_success=False)
+    check(True, "Vault refuses to renew the Proxmox token lease")
+    state = mock_get(args.mock_url, cert, "/__test__/state")
+    check(len(state["active"]) == 1 and state["created"] == 2,
+          "second token exists before natural expiration")
+
+    deadline = time.monotonic() + 130
+    while time.monotonic() < deadline:
+        state = mock_get(args.mock_url, cert, "/__test__/state")
+        if state["deleted"] == 2 and len(state["active"]) == 0:
+            break
+        time.sleep(2)
+    check(
+        state["deleted"] == 2 and len(state["active"]) == 0,
+        "Vault expiration manager automatically deletes an expired Proxmox token",
+    )
 
     # Simulated Proxmox permission denial is a failed issuance, not a
     # successful-looking Vault lease or an automatic permissions escalation.
